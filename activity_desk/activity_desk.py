@@ -1,5 +1,5 @@
 # 사용자 활동을 공통 플러그인 데스크의 세로 스크롤 목록으로 제공합니다.
-from plugins.metadata.activity.activity import ActivityMetadataProvider
+from plugins.metadata.activity.activity import PLUGIN_VERSION, ActivityMetadataProvider
 
 
 class ActivityDeskMetadataProvider(ActivityMetadataProvider):
@@ -7,6 +7,7 @@ class ActivityDeskMetadataProvider(ActivityMetadataProvider):
 
     id = "activity_desk"
     name = "사용자 활동 데스크"
+    version = PLUGIN_VERSION
     show_overall_summary = True
     config_schema = []
     dashboard_widget = {

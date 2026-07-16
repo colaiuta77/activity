@@ -4,12 +4,15 @@ from urllib.parse import quote
 
 from plugins.metadata.base import BaseMetadataProvider
 
+PLUGIN_VERSION = "1.0.0"
+
 
 class ActivityMetadataProvider(BaseMetadataProvider):
     """기존 독서 진행 기록을 읽기 전용 활동 목록으로 제공합니다."""
 
     id = "activity"
     name = "사용자 활동"
+    version = PLUGIN_VERSION
     show_overall_summary = False
     is_searchable = False
     config_schema = [
