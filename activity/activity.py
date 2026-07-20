@@ -1,10 +1,11 @@
 # 사용자별 최근 도서 열람 활동을 대시보드 위젯으로 제공합니다.
+import json
 from html import escape
 from urllib.parse import quote
 
 from plugins.metadata.base import BaseMetadataProvider
 
-PLUGIN_VERSION = "1.0.0"
+PLUGIN_VERSION = "1.0.1"
 
 
 class ActivityMetadataProvider(BaseMetadataProvider):
@@ -93,6 +94,126 @@ class ActivityMetadataProvider(BaseMetadataProvider):
         return self._normalize_limit(configured_limit)
 
     @staticmethod
+    def _get_pending_progress(db_type):
+        try:
+            from utils.redis_helper import get_redis_client, make_key
+
+            client = get_redis_client()
+            if not client:
+                return {}
+
+            normalized_db_type = str(db_type or "general").strip()
+            pending_key = make_key("sync:progress:pending")
+            pending_items = client.smembers(pending_key) or ()
+            progress = {}
+
+            for raw_item in pending_items:
+                item = raw_item.decode("utf-8") if isinstance(raw_item, bytes) else str(raw_item)
+                parts = item.split(":", 2)
+                if len(parts) != 3 or parts[0] != normalized_db_type:
+                    continue
+
+                try:
+                    user_id = int(parts[1])
+                    book_id = int(parts[2])
+                except (TypeError, ValueError):
+                    continue
+
+                try:
+                    raw_payload = client.get(make_key(f"user:progress:{normalized_db_type}:{user_id}:{book_id}"))
+                    if not raw_payload:
+                        continue
+                    if isinstance(raw_payload, bytes):
+                        raw_payload = raw_payload.decode("utf-8")
+
+                    payload = json.loads(raw_payload)
+                    if isinstance(payload, dict):
+                        progress[(user_id, book_id)] = payload
+                except Exception:
+                    continue
+
+            return progress
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _load_pending_row(gateway, user_id, book_id):
+        row = gateway.fetch_one(
+            """
+            SELECT
+                p.id AS progress_id,
+                u.id AS user_id,
+                b.id AS book_id,
+                u.username,
+                b.title,
+                b.series_name,
+                b.library_id,
+                b.cover_image,
+                p.pages_read,
+                b.total_pages,
+                p.last_read_at,
+                (
+                    SELECT COUNT(*)
+                    FROM user_progress all_progress
+                    JOIN books all_books ON all_books.id = all_progress.book_id
+                    WHERE all_progress.user_id = u.id AND COALESCE(all_books.is_deleted, 0) = 0
+                )
+                    AS user_total_activities,
+                CASE WHEN p.id IS NULL THEN 0 ELSE 1 END AS is_persisted
+            FROM users u
+            JOIN books b ON b.id = ?
+            LEFT JOIN user_progress p ON p.book_id = b.id AND p.user_id = u.id
+            WHERE u.id = ? AND COALESCE(b.is_deleted, 0) = 0
+            """,
+            (book_id, user_id),
+        )
+        return dict(row) if row else None
+
+    def _merge_pending_progress(self, gateway, rows, pending_progress):
+        merged_rows = {}
+        user_totals = {}
+        cached_only_counts = {}
+
+        for raw_row in rows:
+            row = dict(raw_row)
+            user_id = int(row["user_id"])
+            book_id = int(row["book_id"])
+            merged_rows[(user_id, book_id)] = row
+            user_totals[user_id] = max(
+                user_totals.get(user_id, 0),
+                int(row.get("user_total_activities") or 0),
+            )
+
+        for (user_id, book_id), payload in pending_progress.items():
+            row = merged_rows.get((user_id, book_id))
+            if row is None:
+                row = self._load_pending_row(gateway, user_id, book_id)
+                if row is None:
+                    continue
+                merged_rows[(user_id, book_id)] = row
+                user_totals[user_id] = max(
+                    user_totals.get(user_id, 0),
+                    int(row.get("user_total_activities") or 0),
+                )
+                if not int(row.get("is_persisted") or 0):
+                    cached_only_counts[user_id] = cached_only_counts.get(user_id, 0) + 1
+
+            try:
+                row["pages_read"] = max(0, int(payload.get("pages_read", row.get("pages_read") or 0)))
+            except (TypeError, ValueError):
+                pass
+            if payload.get("last_read_at"):
+                row["last_read_at"] = payload["last_read_at"]
+
+        for user_id, cached_only_count in cached_only_counts.items():
+            user_totals[user_id] = user_totals.get(user_id, 0) + cached_only_count
+
+        for (user_id, _), row in merged_rows.items():
+            row["user_total_activities"] = user_totals.get(user_id, 0)
+
+        return list(merged_rows.values())
+
+    @staticmethod
     def _is_admin_request():
         try:
             from flask import has_request_context, session
@@ -110,6 +231,9 @@ class ActivityMetadataProvider(BaseMetadataProvider):
         rows = gateway.fetch_all(
             """
             SELECT
+                user_id,
+                book_id,
+                progress_id,
                 username,
                 title,
                 series_name,
@@ -121,6 +245,9 @@ class ActivityMetadataProvider(BaseMetadataProvider):
                 user_total_activities
             FROM (
                 SELECT
+                    p.user_id AS user_id,
+                    p.book_id AS book_id,
+                    p.id AS progress_id,
                     u.username,
                     b.title,
                     b.series_name,
@@ -129,7 +256,6 @@ class ActivityMetadataProvider(BaseMetadataProvider):
                     p.pages_read,
                     b.total_pages,
                     p.last_read_at,
-                    p.id,
                     COUNT(*) OVER (PARTITION BY p.user_id) AS user_total_activities,
                     ROW_NUMBER() OVER (
                         PARTITION BY p.user_id
@@ -141,14 +267,27 @@ class ActivityMetadataProvider(BaseMetadataProvider):
                 WHERE COALESCE(b.is_deleted, 0) = 0
             ) ranked_activity
             WHERE user_row_number <= ?
-            ORDER BY username COLLATE NOCASE ASC, last_read_at DESC, id DESC
+            ORDER BY username COLLATE NOCASE ASC, last_read_at DESC, progress_id DESC
             """,
             (safe_limit,),
         )
 
-        grouped_rows = {}
+        rows = self._merge_pending_progress(gateway, rows, self._get_pending_progress(db_type))
+        all_grouped_rows = {}
         for row in rows:
-            grouped_rows.setdefault(row["username"], []).append(row)
+            all_grouped_rows.setdefault(row["username"], []).append(row)
+
+        grouped_rows = {}
+        for username in sorted(all_grouped_rows, key=lambda value: str(value).casefold()):
+            user_rows = sorted(
+                all_grouped_rows[username],
+                key=lambda row: (
+                    str(row.get("last_read_at") or ""),
+                    int(row.get("progress_id") or row.get("book_id") or 0),
+                ),
+                reverse=True,
+            )
+            grouped_rows[username] = user_rows[:safe_limit]
 
         items = []
         if self.show_overall_summary:
