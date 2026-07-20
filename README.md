@@ -65,10 +65,10 @@ git clone https://github.com/colaiuta77/activity.git activity
 2. `환경설정 > 플러그인 설정`에서 `사용자 활동`을 활성화합니다.
 3. 라이브러리의 플러그인 화면에서 전용 Activity 탭을 확인합니다.
 
-업데이트할 때는 다음 명령을 실행합니다.
+업데이트할 때는 BookOasis의 `plugins/metadata/`에서 다음 명령을 실행합니다.
 
 ```bash
-git -C plugins/metadata/activity pull --ff-only
+git -C activity pull --ff-only
 ```
 
 Docker 환경에서는 BookOasis 소스가 연결된 호스트 볼륨 또는 컨테이너의 동일한 경로에 설치해야 합니다. BookOasis 업데이트 후에도 플러그인 폴더가 유지되는지 확인하세요.
