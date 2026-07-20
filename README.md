@@ -1,8 +1,6 @@
 # BookOasis 사용자 활동
 
-BookOasis에 저장된 독서 진행 기록을 이용해 사용자별 최근 열람 도서와 진행률을 보여주는 독립 설치형 대시보드 플러그인입니다. 전용 Activity 탭과 공통 플러그인 데스크를 함께 제공합니다.
-
-![공통 플러그인 데스크의 사용자 활동 위젯](docs/activity-desk.png)
+BookOasis에 저장된 독서 진행 기록을 이용해 사용자별 최근 열람 도서와 진행률을 보여주는 독립 설치형 Activity 탭 플러그인입니다.
 
 ![전용 사용자 활동 탭](docs/activity-tab.png)
 
@@ -11,9 +9,9 @@ BookOasis에 저장된 독서 진행 기록을 이용해 사용자별 최근 열
 | 항목 | 값 |
 | --- | --- |
 | 플러그인 버전 | `1.0.1` |
-| 플러그인 ID | `activity`, `activity_desk` |
-| 클래스 | `ActivityMetadataProvider`, `ActivityDeskMetadataProvider` |
-| 모듈 | `plugins.metadata.activity.activity`, `plugins.metadata.activity_desk.activity_desk` |
+| 플러그인 ID | `activity` |
+| 클래스 | `ActivityMetadataProvider` |
+| 모듈 | `plugins.metadata.activity.activity` |
 | 유형 | 읽기 전용 대시보드 제공자 |
 | 확인한 BookOasis 버전 | `1.2.1` |
 | 확인한 BookOasis 커밋 | `4f204be` |
@@ -34,15 +32,9 @@ BookOasis에 저장된 독서 진행 기록을 이용해 사용자별 최근 열
 
 ## 화면 구성
 
-### 사용자 활동
-
 `activity`는 `all_desk_tab=True`인 전용 탭입니다. 사용자별 요약과 해당 사용자의 최근 도서를 표시하며 전체 활동 요약은 표시하지 않습니다.
 
-### 사용자 활동 데스크
-
-`activity_desk`는 공통 플러그인 데스크의 세로 스크롤 위젯입니다. 최상단에 전체 사용자 수와 열람 기록 수를 표시하고 그 아래에 사용자별 활동을 표시합니다.
-
-`activity_desk`는 `activity`의 조회 로직과 설정을 공유하므로 두 폴더를 함께 설치해야 합니다.
+공통 플러그인 데스크에서도 같은 활동을 표시하려면 별도 [Activity Desk 플러그인](https://github.com/colaiuta77/activity_desk)을 추가로 설치하세요.
 
 ## 설정
 
@@ -50,7 +42,7 @@ BookOasis에 저장된 독서 진행 기록을 이용해 사용자별 최근 열
 | --- | --- | --- | --- |
 | `ITEMS_PER_USER` | number | `20` | 사용자 한 명당 표시할 최근 도서 수. 허용 범위 1~100 |
 
-설정은 `환경설정 > 플러그인 설정 > 사용자 활동`에서 저장합니다. `사용자 활동 데스크`도 같은 값을 사용합니다.
+설정은 `환경설정 > 플러그인 설정 > 사용자 활동`에서 저장합니다. 별도 Activity Desk 플러그인도 이 값을 공유합니다.
 
 ## 설치
 
@@ -58,18 +50,26 @@ BookOasis에 저장된 독서 진행 기록을 이용해 사용자별 최근 열
 
 ```text
 plugins/metadata/
-├── activity/
-│   ├── __init__.py
-│   └── activity.py
-└── activity_desk/
+└── activity/
     ├── __init__.py
-    └── activity_desk.py
+    └── activity.py
 ```
 
-1. 이 저장소의 `activity`, `activity_desk` 폴더를 BookOasis의 `plugins/metadata/` 아래에 복사합니다.
-2. BookOasis 서버를 재시작합니다.
-3. `환경설정 > 플러그인 설정`에서 `사용자 활동`과 `사용자 활동 데스크`를 활성화합니다.
-4. 라이브러리의 플러그인 화면에서 전용 탭과 공통 플러그인 데스크 위젯을 확인합니다.
+BookOasis의 `plugins/metadata/`에서 다음 명령을 실행합니다.
+
+```bash
+git clone https://github.com/colaiuta77/activity.git activity
+```
+
+1. BookOasis 서버를 재시작합니다.
+2. `환경설정 > 플러그인 설정`에서 `사용자 활동`을 활성화합니다.
+3. 라이브러리의 플러그인 화면에서 전용 Activity 탭을 확인합니다.
+
+업데이트할 때는 다음 명령을 실행합니다.
+
+```bash
+git -C plugins/metadata/activity pull --ff-only
+```
 
 Docker 환경에서는 BookOasis 소스가 연결된 호스트 볼륨 또는 컨테이너의 동일한 경로에 설치해야 합니다. BookOasis 업데이트 후에도 플러그인 폴더가 유지되는지 확인하세요.
 
@@ -94,14 +94,15 @@ Docker 환경에서는 BookOasis 소스가 연결된 호스트 볼륨 또는 컨
 ## 검증
 
 ```powershell
-python -m unittest discover -s tests -v
-python -m py_compile activity\__init__.py activity\activity.py activity_desk\__init__.py activity_desk\activity_desk.py
+python -m py_compile __init__.py activity.py
 ```
 
 ## 변경 이력
 
 ### 1.0.1 - 2026-07-20
 
+- 저장소 루트를 `plugins/metadata/activity`에 직접 clone할 수 있는 단일 플러그인 구조로 변경.
+- Activity Desk를 별도 저장소로 분리.
 - BookOasis 1.2.1의 Redis 비동기 진행률 저장 방식 지원.
 - SQLite에 아직 반영되지 않은 최신 페이지와 마지막 열람 시각을 Redis pending 데이터로 보정.
 - Redis에만 존재하는 첫 열람 도서도 사용자별 최근 활동과 전체 건수에 포함.
