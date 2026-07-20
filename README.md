@@ -10,13 +10,14 @@ BookOasis에 저장된 독서 진행 기록을 이용해 사용자별 최근 열
 
 | 항목 | 값 |
 | --- | --- |
-| 플러그인 버전 | `1.0.0` |
+| 플러그인 버전 | `1.0.1` |
 | 플러그인 ID | `activity`, `activity_desk` |
 | 클래스 | `ActivityMetadataProvider`, `ActivityDeskMetadataProvider` |
 | 모듈 | `plugins.metadata.activity.activity`, `plugins.metadata.activity_desk.activity_desk` |
 | 유형 | 읽기 전용 대시보드 제공자 |
-| 확인한 BookOasis 커밋 | `cb2847f` |
-| 문서 작성일 | `2026-07-16` |
+| 확인한 BookOasis 버전 | `1.2.1` |
+| 확인한 BookOasis 커밋 | `4f204be` |
+| 문서 작성일 | `2026-07-20` |
 
 이 플러그인은 BookOasis의 권장 폴더형 플러그인 구조와 `PluginDatabaseGateway`를 사용합니다. BookOasis 공통 UI나 코어 파일을 수정하지 않습니다.
 
@@ -28,6 +29,7 @@ BookOasis에 저장된 독서 진행 기록을 이용해 사용자별 최근 열
 - 진행 중과 완독 상태를 구분하고 제한적 HTML이 지원되는 화면에서는 색상으로 강조합니다.
 - 제목이나 표지를 클릭하면 BookOasis 도서 상세 화면으로 이동합니다.
 - 사용자별 표시 제한을 적용하므로 한 사용자의 기록이 다른 사용자를 밀어내지 않습니다.
+- Redis에 아직 쌓여 있는 최신 진행률과 첫 열람 기록을 SQLite 결과에 병합합니다.
 - 관리자 세션에서만 전체 사용자 활동 데이터를 반환합니다.
 
 ## 화면 구성
@@ -74,6 +76,8 @@ Docker 환경에서는 BookOasis 소스가 연결된 호스트 볼륨 또는 컨
 ## 데이터와 보안
 
 - `users`, `user_progress`, `books` 테이블을 DB Gateway를 통해 읽기 전용으로 조회합니다.
+- BookOasis 1.2.1의 `sync:progress:pending`과 `user:progress` Redis 키를 읽기 전용으로 병합합니다.
+- Redis를 사용할 수 없거나 데이터가 손상된 경우 해당 항목을 건너뛰고 SQLite 결과를 사용합니다.
 - 삭제된 도서는 활동 목록에서 제외합니다.
 - 위젯 데이터 요청 시 Flask 세션의 관리자 역할을 다시 확인합니다.
 - 사용자명은 제한적 HTML 필드에 넣기 전에 HTML 이스케이프합니다.
@@ -81,7 +85,7 @@ Docker 환경에서는 BookOasis 소스가 연결된 호스트 볼륨 또는 컨
 
 ## 제한 사항
 
-- 이 화면은 실시간 접속 목록이 아니라 `user_progress.last_read_at`을 기준으로 한 최근 활동입니다.
+- 이 화면은 실시간 접속 목록이 아니라 SQLite `user_progress`와 아직 flush되지 않은 Redis 진행률을 기준으로 한 최근 활동입니다.
 - BookOasis가 저장하지 않는 IP, 브라우저, 운영체제, 클라이언트 종류와 온라인 상태는 표시할 수 없습니다.
 - 상세 이동에는 대시보드 플러그인 클릭 계약이 포함된 BookOasis 버전이 필요합니다.
 - 제한적 HTML은 `metric`, `value`, `description` 등 BookOasis가 허용한 필드에서만 사용합니다. 임의 HTML 레이아웃, CSS 파일과 JavaScript 삽입은 지원되지 않습니다.
@@ -95,6 +99,14 @@ python -m py_compile activity\__init__.py activity\activity.py activity_desk\__i
 ```
 
 ## 변경 이력
+
+### 1.0.1 - 2026-07-20
+
+- BookOasis 1.2.1의 Redis 비동기 진행률 저장 방식 지원.
+- SQLite에 아직 반영되지 않은 최신 페이지와 마지막 열람 시각을 Redis pending 데이터로 보정.
+- Redis에만 존재하는 첫 열람 도서도 사용자별 최근 활동과 전체 건수에 포함.
+- Redis 데이터 병합 후 사용자별 날짜 내림차순과 표시 권수 제한을 다시 적용.
+- Redis 미사용, 연결 실패와 손상된 JSON에서 기존 SQLite 조회로 안전하게 폴백.
 
 ### 1.0.0 - 2026-07-16
 
