@@ -5,7 +5,7 @@ from urllib.parse import quote
 
 from plugins.metadata.base import BaseMetadataProvider
 
-PLUGIN_VERSION = "1.0.1"
+PLUGIN_VERSION = "1.0.2"
 
 
 class ActivityMetadataProvider(BaseMetadataProvider):
@@ -33,6 +33,15 @@ class ActivityMetadataProvider(BaseMetadataProvider):
         "icon": "fa-solid fa-users-viewfinder",
         "limit": 20,
         "all_desk_tab": True,
+    }
+    update_manifest = {
+        "enabled": True,
+        "provider": "github-raw",
+        "raw_base_url": "https://raw.githubusercontent.com/colaiuta77/activity/main",
+        "files": ["activity.py", "__init__.py", "VERSION"],
+        "version_file": "VERSION",
+        "version_key": "plugin version",
+        "show_sample_update_button": True,
     }
 
     def search(self, db_type, query):
