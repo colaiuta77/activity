@@ -8,14 +8,14 @@ BookOasis에 저장된 독서 진행 기록을 이용해 사용자별 최근 열
 
 | 항목 | 값 |
 | --- | --- |
-| 플러그인 버전 | `1.0.1` |
+| 플러그인 버전 | `1.0.2` |
 | 플러그인 ID | `activity` |
 | 클래스 | `ActivityMetadataProvider` |
 | 모듈 | `plugins.metadata.activity.activity` |
 | 유형 | 읽기 전용 대시보드 제공자 |
-| 확인한 BookOasis 버전 | `1.2.1` |
-| 확인한 BookOasis 커밋 | `4f204be` |
-| 문서 작성일 | `2026-07-20` |
+| 확인한 BookOasis 버전 | `1.2.7` |
+| 확인한 BookOasis 커밋 | `b77bb62` |
+| 문서 작성일 | `2026-07-21` |
 
 이 플러그인은 BookOasis의 권장 폴더형 플러그인 구조와 `PluginDatabaseGateway`를 사용합니다. BookOasis 공통 UI나 코어 파일을 수정하지 않습니다.
 
@@ -52,7 +52,8 @@ BookOasis에 저장된 독서 진행 기록을 이용해 사용자별 최근 열
 plugins/metadata/
 └── activity/
     ├── __init__.py
-    └── activity.py
+    ├── activity.py
+    └── VERSION
 ```
 
 BookOasis의 `plugins/metadata/`에서 다음 명령을 실행합니다.
@@ -70,6 +71,12 @@ git clone https://github.com/colaiuta77/activity.git activity
 ```bash
 git -C activity pull --ff-only
 ```
+
+### 자동 업데이트
+
+버전 1.0.2부터 BookOasis의 `update_manifest` 계약과 `VERSION` 파일을 지원합니다. `환경설정 > 플러그인 설정 > 사용자 활동`에 표시되는 업데이트 버튼으로 GitHub `main`의 `activity.py`, `__init__.py`, `VERSION`을 갱신할 수 있습니다.
+
+1.0.1 이하 설치본에는 업데이트 선언과 `VERSION` 파일이 없으므로 위 `git pull` 방식으로 1.0.2 이상을 한 번 설치해야 합니다. 이후에는 GitHub 버전이 현재 버전보다 높을 때만 자동 업데이트가 실행됩니다.
 
 Docker 환경에서는 BookOasis 소스가 연결된 호스트 볼륨 또는 컨테이너의 동일한 경로에 설치해야 합니다. BookOasis 업데이트 후에도 플러그인 폴더가 유지되는지 확인하세요.
 
@@ -98,6 +105,12 @@ python -m py_compile __init__.py activity.py
 ```
 
 ## 변경 이력
+
+### 1.0.2 - 2026-07-21
+
+- BookOasis 플러그인 자동 업데이트용 `update_manifest` 추가.
+- 공식 규격의 `VERSION` 파일과 `plugin version` 키 추가.
+- GitHub `main`의 런타임 파일만 갱신하도록 업데이트 범위 제한.
 
 ### 1.0.1 - 2026-07-20
 
