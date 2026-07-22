@@ -1,11 +1,13 @@
 # 사용자별 최근 도서 열람 활동을 대시보드 위젯으로 제공합니다.
 import json
+import logging
 from html import escape
 from urllib.parse import quote
 
 from plugins.metadata.base import BaseMetadataProvider
 
-PLUGIN_VERSION = "1.0.2"
+PLUGIN_VERSION = "1.0.3"
+logger = logging.getLogger(__name__)
 
 
 class ActivityMetadataProvider(BaseMetadataProvider):
@@ -62,6 +64,24 @@ class ActivityMetadataProvider(BaseMetadataProvider):
         if not cover_image:
             return "/static/images/default_cover.jpg"
         return f"/covers/{quote(str(cover_image), safe='/')}"
+
+    @staticmethod
+    def _empty_state_item():
+        return {
+            "item_type": "metric",
+            "metric": "📖 <strong>최근 사용자 활동</strong>",
+            "value": "아무도 읽은 책이 없습니다.",
+            "description": "도서를 열람하면 사용자별 최근 활동이 여기에 표시됩니다.",
+        }
+
+    @staticmethod
+    def _error_state_item():
+        return {
+            "item_type": "metric",
+            "metric": "⚠️ <strong>사용자 활동</strong>",
+            "value": "사용자 활동을 불러오지 못했습니다.",
+            "description": "잠시 후 다시 시도하고 BookOasis 로그를 확인해 주세요.",
+        }
 
     @staticmethod
     def _progress_text(pages_read, total_pages):
@@ -235,6 +255,13 @@ class ActivityMetadataProvider(BaseMetadataProvider):
         if not self._is_admin_request():
             return {"success": False, "error": "관리자만 사용자 활동을 조회할 수 있습니다."}
 
+        try:
+            return self._build_dashboard_data(db_type, limit)
+        except Exception:
+            logger.exception("사용자 활동 조회에 실패했습니다.")
+            return {"success": True, "items": [self._error_state_item()]}
+
+    def _build_dashboard_data(self, db_type, limit=20):
         safe_limit = self._items_per_user(db_type, limit)
         gateway = self.get_db_gateway(db_type)
         rows = gateway.fetch_all(
@@ -297,6 +324,9 @@ class ActivityMetadataProvider(BaseMetadataProvider):
                 reverse=True,
             )
             grouped_rows[username] = user_rows[:safe_limit]
+
+        if not grouped_rows:
+            return {"success": True, "items": [self._empty_state_item()]}
 
         items = []
         if self.show_overall_summary:
