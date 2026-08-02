@@ -14,7 +14,7 @@ BookOasis에 저장된 독서 진행 기록을 이용해 사용자별 최근 열
 | 모듈 | `plugins.metadata.activity.activity` |
 | 유형 | 읽기 전용 카테고리 UI 제공자 |
 | 확인한 BookOasis 버전 | `1.6.1` |
-| 문서 작성일 | `2026-08-02` |
+| 문서 작성일 | `2026-08-03` |
 
 이 플러그인은 BookOasis의 권장 폴더형 플러그인 구조와 `PluginDatabaseGateway`를 사용합니다. BookOasis 공통 UI나 코어 파일을 수정하지 않습니다.
 
@@ -125,6 +125,7 @@ python -m unittest discover -s tests -v
 - 공통 데스크 표시 수, 기본 정렬, 완독 및 사용자 요약 표시 설정 추가.
 - 도서 컨텍스트 메뉴의 사용자별 열람 활동 요약 추가.
 - 구조화된 활동·요약·화면 설정 응답과 UI 자산 자동 업데이트 계약 추가.
+- 실제 BookOasis 전용 카테고리 화면으로 README 스크린샷 갱신.
 
 ### 1.0.3 - 2026-07-22
 
