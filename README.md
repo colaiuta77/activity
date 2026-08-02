@@ -1,6 +1,6 @@
 # BookOasis 사용자 활동
 
-BookOasis에 저장된 독서 진행 기록을 이용해 사용자별 최근 열람 도서와 진행률을 보여주는 독립 설치형 Activity 탭 플러그인입니다.
+BookOasis에 저장된 독서 진행 기록을 이용해 사용자별 최근 열람 도서와 진행률을 보여주는 독립 카테고리 플러그인입니다.
 
 ![전용 사용자 활동 탭](docs/activity-tab.png)
 
@@ -8,14 +8,13 @@ BookOasis에 저장된 독서 진행 기록을 이용해 사용자별 최근 열
 
 | 항목 | 값 |
 | --- | --- |
-| 플러그인 버전 | `1.0.3` |
+| 플러그인 버전 | `1.1.0` |
 | 플러그인 ID | `activity` |
 | 클래스 | `ActivityMetadataProvider` |
 | 모듈 | `plugins.metadata.activity.activity` |
-| 유형 | 읽기 전용 대시보드 제공자 |
-| 확인한 BookOasis 버전 | `1.3.0` |
-| 확인한 BookOasis 커밋 | `3444153` |
-| 문서 작성일 | `2026-07-22` |
+| 유형 | 읽기 전용 카테고리 UI 제공자 |
+| 확인한 BookOasis 버전 | `1.6.1` |
+| 문서 작성일 | `2026-08-03` |
 
 이 플러그인은 BookOasis의 권장 폴더형 플러그인 구조와 `PluginDatabaseGateway`를 사용합니다. BookOasis 공통 UI나 코어 파일을 수정하지 않습니다.
 
@@ -31,10 +30,12 @@ BookOasis에 저장된 독서 진행 기록을 이용해 사용자별 최근 열
 - 열람 기록이 없으면 `아무도 읽은 책이 없습니다.` 안내를 표시합니다.
 - 활동 조회 중 오류가 발생하면 무한 로딩 대신 재시도 안내를 표시하고 서버 로그에 원인을 기록합니다.
 - 관리자 세션에서만 전체 사용자 활동 데이터를 반환합니다.
+- 사용자·기간·정렬 필터와 진행률 바가 있는 반응형 풀페이지 화면을 제공합니다.
+- 도서 컨텍스트 메뉴에서 해당 도서의 사용자별 열람 활동을 요약합니다.
 
 ## 화면 구성
 
-`activity`는 `all_desk_tab=True`인 전용 탭입니다. 사용자별 요약과 해당 사용자의 최근 도서를 표시하며 전체 활동 요약은 표시하지 않습니다.
+`activity`는 `category_tab` 계약을 사용하는 좌측 사이드바의 `사용자 활동` 카테고리입니다. 전체 활동 요약, 사용자별 섹션과 해당 사용자의 최근 도서를 표시합니다.
 
 공통 플러그인 데스크에서도 같은 활동을 표시하려면 별도 [Activity Desk 플러그인](https://github.com/colaiuta77/activity_desk)을 추가로 설치하세요.
 
@@ -43,6 +44,10 @@ BookOasis에 저장된 독서 진행 기록을 이용해 사용자별 최근 열
 | 키 | UI 유형 | 기본값 | 설명 |
 | --- | --- | --- | --- |
 | `ITEMS_PER_USER` | number | `20` | 사용자 한 명당 표시할 최근 도서 수. 허용 범위 1~100 |
+| `DESK_ITEM_LIMIT` | number | `5` | Activity Desk에 표시할 최신 활동 수. 허용 범위 1~20 |
+| `DEFAULT_SORT` | select | `recent` | 최근 열람순, 진행률 높은 순 또는 사용자명순 |
+| `SHOW_COMPLETED` | checkbox | `true` | 완독 도서 표시 여부 |
+| `SHOW_USER_SUMMARY` | checkbox | `true` | 사용자별 전체 기록 요약 표시 여부 |
 
 설정은 `환경설정 > 플러그인 설정 > 사용자 활동`에서 저장합니다. 별도 Activity Desk 플러그인도 이 값을 공유합니다.
 
@@ -55,6 +60,9 @@ plugins/metadata/
 └── activity/
     ├── __init__.py
     ├── activity.py
+    ├── index.html
+    ├── style.css
+    ├── script.js
     └── VERSION
 ```
 
@@ -66,7 +74,7 @@ git clone https://github.com/colaiuta77/activity.git activity
 
 1. BookOasis 서버를 재시작합니다.
 2. `환경설정 > 플러그인 설정`에서 `사용자 활동`을 활성화합니다.
-3. 라이브러리의 플러그인 화면에서 전용 Activity 탭을 확인합니다.
+3. 좌측 사이드바의 `사용자 활동` 카테고리를 확인합니다.
 
 업데이트할 때는 BookOasis의 `plugins/metadata/`에서 다음 명령을 실행합니다.
 
@@ -76,7 +84,7 @@ git -C activity pull --ff-only
 
 ### 자동 업데이트
 
-버전 1.0.2부터 BookOasis의 `update_manifest` 계약과 `VERSION` 파일을 지원합니다. `환경설정 > 플러그인 설정 > 사용자 활동`에 표시되는 업데이트 버튼으로 GitHub `main`의 `activity.py`, `__init__.py`, `VERSION`을 갱신할 수 있습니다.
+버전 1.0.2부터 BookOasis의 `update_manifest` 계약과 `VERSION` 파일을 지원합니다. 1.1.0부터 업데이트 버튼이 Python 파일뿐 아니라 풀페이지 UI의 `index.html`, `style.css`, `script.js`도 함께 갱신합니다.
 
 1.0.1 이하 설치본에는 업데이트 선언과 `VERSION` 파일이 없으므로 위 `git pull` 방식으로 1.0.2 이상을 한 번 설치해야 합니다. 이후에는 GitHub 버전이 현재 버전보다 높을 때만 자동 업데이트가 실행됩니다.
 
@@ -96,8 +104,8 @@ Docker 환경에서는 BookOasis 소스가 연결된 호스트 볼륨 또는 컨
 
 - 이 화면은 실시간 접속 목록이 아니라 SQLite `user_progress`와 아직 flush되지 않은 Redis 진행률을 기준으로 한 최근 활동입니다.
 - BookOasis가 저장하지 않는 IP, 브라우저, 운영체제, 클라이언트 종류와 온라인 상태는 표시할 수 없습니다.
-- 상세 이동에는 대시보드 플러그인 클릭 계약이 포함된 BookOasis 버전이 필요합니다.
-- 제한적 HTML은 `metric`, `value`, `description` 등 BookOasis가 허용한 필드에서만 사용합니다. 임의 HTML 레이아웃, CSS 파일과 JavaScript 삽입은 지원되지 않습니다.
+- 카테고리 메뉴와 풀페이지 UI는 `category_tab` 계약이 있는 BookOasis 1.0.7 이상이 필요합니다.
+- 동적 사용자·도서 데이터는 임의 HTML로 삽입하지 않고 안전한 DOM `textContent`로 렌더링합니다.
 - BookOasis의 플러그인 계약 또는 DB 스키마가 변경되면 호환성 업데이트가 필요할 수 있습니다.
 
 ## 검증
@@ -108,6 +116,16 @@ python -m unittest discover -s tests -v
 ```
 
 ## 변경 이력
+
+### 1.1.0 - 2026-08-02
+
+- 좌측 사이드바의 1등 시민 `사용자 활동` 카테고리와 풀페이지 UI 추가.
+- 사용자·기간·정렬 필터, 전체 요약 카드와 사용자별 진행률 카드 추가.
+- 진행률 바, 진행 중·완독 배지, 반응형 모바일 레이아웃과 테마 CSS 변수 적용.
+- 공통 데스크 표시 수, 기본 정렬, 완독 및 사용자 요약 표시 설정 추가.
+- 도서 컨텍스트 메뉴의 사용자별 열람 활동 요약 추가.
+- 구조화된 활동·요약·화면 설정 응답과 UI 자산 자동 업데이트 계약 추가.
+- 실제 BookOasis 전용 카테고리 화면으로 README 스크린샷 갱신.
 
 ### 1.0.3 - 2026-07-22
 

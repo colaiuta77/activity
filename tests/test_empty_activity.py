@@ -101,6 +101,15 @@ class ActivityEmptyStateTest(unittest.TestCase):
         self.assertEqual(result["items"][0]["value"], "사용자 활동을 불러오지 못했습니다.")
         self.assertIn("사용자 활동 조회에 실패했습니다.", captured.output[0])
 
+    def test_exposes_category_ui_and_update_assets(self):
+        provider = self.provider_class()
+
+        self.assertEqual("1.1.0", provider.version)
+        self.assertIsNone(provider.dashboard_widget)
+        self.assertEqual("사용자 활동", provider.category_tab["title"])
+        self.assertIn("index.html", provider.update_manifest["files"])
+        self.assertIn("script.js", provider.update_manifest["files"])
+
 
 if __name__ == "__main__":
     unittest.main()
