@@ -6,7 +6,7 @@ from urllib.parse import quote
 
 from plugins.metadata.base import BaseMetadataProvider
 
-PLUGIN_VERSION = "1.0.3"
+PLUGIN_VERSION = "1.1.0"
 logger = logging.getLogger(__name__)
 
 
@@ -26,21 +26,50 @@ class ActivityMetadataProvider(BaseMetadataProvider):
             "default": 20,
             "required": True,
             "description": "사용자 한 명당 최근 활동에 표시할 최대 도서 수입니다. 1~100권까지 적용됩니다.",
-        }
+        },
+        {
+            "key": "DESK_ITEM_LIMIT",
+            "label": "공통 데스크 표시 권수",
+            "type": "number",
+            "default": 5,
+            "required": True,
+            "description": "Activity Desk에 최근 활동을 최대 몇 건 표시할지 지정합니다. 1~20건까지 적용됩니다.",
+        },
+        {
+            "key": "DEFAULT_SORT",
+            "label": "기본 정렬",
+            "type": "select",
+            "default": "recent",
+            "options": [
+                {"value": "recent", "label": "최근 열람순"},
+                {"value": "progress", "label": "진행률 높은 순"},
+                {"value": "username", "label": "사용자명순"},
+            ],
+        },
+        {
+            "key": "SHOW_COMPLETED",
+            "label": "완독 도서 표시",
+            "type": "checkbox",
+            "default": True,
+        },
+        {
+            "key": "SHOW_USER_SUMMARY",
+            "label": "사용자별 요약 표시",
+            "type": "checkbox",
+            "default": True,
+        },
     ]
-    dashboard_widget = {
-        "title": "최근 사용자 활동",
-        "subtitle": "사용자별 도서 진행도와 마지막 열람 시각",
-        "provider": "BookOasis",
+    dashboard_widget = None
+    category_tab = {
+        "title": "사용자 활동",
         "icon": "fa-solid fa-users-viewfinder",
-        "limit": 20,
-        "all_desk_tab": True,
+        "order": 80,
     }
     update_manifest = {
         "enabled": True,
         "provider": "github-raw",
         "raw_base_url": "https://raw.githubusercontent.com/colaiuta77/activity/main",
-        "files": ["activity.py", "__init__.py", "VERSION"],
+        "files": ["activity.py", "__init__.py", "VERSION", "index.html", "style.css", "script.js"],
         "version_file": "VERSION",
         "version_key": "plugin version",
         "show_sample_update_button": True,
@@ -51,6 +80,55 @@ class ActivityMetadataProvider(BaseMetadataProvider):
 
     def apply(self, db_type, book_id, item_data):
         return False, "사용자 활동 플러그인은 메타데이터 적용을 지원하지 않습니다."
+
+    def get_context_menu_items(self, db_type, context):
+        context = context or {}
+        if not self._is_admin_request() or not context.get("book_id"):
+            return []
+        return [
+            {
+                "id": "show_book_activity",
+                "label": "이 책의 열람 활동 요약",
+                "icon": "fa-solid fa-users-viewfinder",
+            }
+        ]
+
+    def run_context_menu_action(self, db_type, action_id, context):
+        context = context or {}
+        if action_id != "show_book_activity":
+            return {"success": False, "error": "지원하지 않는 사용자 활동 메뉴입니다."}
+        if not self._is_admin_request():
+            return {"success": False, "error": "관리자만 사용자 활동을 조회할 수 있습니다."}
+
+        try:
+            book_id = int(context.get("book_id"))
+        except (TypeError, ValueError):
+            return {"success": False, "error": "도서 식별자가 올바르지 않습니다."}
+
+        rows = self.get_db_gateway(db_type).fetch_all(
+            """
+            SELECT u.username, p.pages_read, b.total_pages, p.last_read_at
+            FROM user_progress p
+            JOIN users u ON u.id = p.user_id
+            JOIN books b ON b.id = p.book_id
+            WHERE p.book_id = ? AND COALESCE(b.is_deleted, 0) = 0
+            ORDER BY p.last_read_at DESC, p.id DESC
+            """,
+            (book_id,),
+        )
+        if not rows:
+            return {"success": True, "message": "이 책의 열람 활동이 아직 없습니다."}
+
+        summaries = []
+        for row in rows[:5]:
+            summaries.append(
+                f"{row['username']} · {self._progress_text(row['pages_read'], row['total_pages'])}"
+            )
+        remainder = len(rows) - len(summaries)
+        message = "\n".join(summaries)
+        if remainder > 0:
+            message += f"\n외 {remainder}명"
+        return {"success": True, "message": message}
 
     @staticmethod
     def _normalize_limit(limit):
@@ -114,13 +192,37 @@ class ActivityMetadataProvider(BaseMetadataProvider):
         value = str(last_read_at or "").replace("T", " ")
         return value[:16]
 
-    def _items_per_user(self, db_type, fallback):
+    def _plugin_config(self, db_type):
         try:
             config = self.get_plugin_config(db_type, default={})
         except Exception:
             config = {}
+        return config if isinstance(config, dict) else {}
+
+    def _items_per_user(self, db_type, fallback, config=None):
+        config = config if isinstance(config, dict) else self._plugin_config(db_type)
         configured_limit = config.get("ITEMS_PER_USER", fallback) if isinstance(config, dict) else fallback
         return self._normalize_limit(configured_limit)
+
+    @staticmethod
+    def _normalize_desk_limit(value):
+        try:
+            return max(1, min(int(value), 20))
+        except (TypeError, ValueError):
+            return 5
+
+    @staticmethod
+    def _config_bool(config, key, default=True):
+        value = config.get(key, default)
+        if isinstance(value, str):
+            return value.strip().lower() not in {"0", "false", "no", "off", ""}
+        return bool(value)
+
+    @staticmethod
+    def _progress_percent(pages_read, total_pages):
+        pages = max(0, int(pages_read or 0))
+        total = max(0, int(total_pages or 0))
+        return min(100, round((pages / total) * 100)) if total else 0
 
     @staticmethod
     def _get_pending_progress(db_type):
@@ -262,7 +364,13 @@ class ActivityMetadataProvider(BaseMetadataProvider):
             return {"success": True, "items": [self._error_state_item()]}
 
     def _build_dashboard_data(self, db_type, limit=20):
-        safe_limit = self._items_per_user(db_type, limit)
+        config = self._plugin_config(db_type)
+        safe_limit = self._items_per_user(db_type, limit, config=config)
+        default_sort = str(config.get("DEFAULT_SORT", "recent") or "recent").strip().lower()
+        if default_sort not in {"recent", "progress", "username"}:
+            default_sort = "recent"
+        show_completed = self._config_bool(config, "SHOW_COMPLETED", True)
+        show_user_summary = self._config_bool(config, "SHOW_USER_SUMMARY", True)
         gateway = self.get_db_gateway(db_type)
         rows = gateway.fetch_all(
             """
@@ -309,41 +417,86 @@ class ActivityMetadataProvider(BaseMetadataProvider):
         )
 
         rows = self._merge_pending_progress(gateway, rows, self._get_pending_progress(db_type))
+        all_user_totals = {}
+        for row in rows:
+            user_id = int(row["user_id"])
+            all_user_totals[user_id] = max(
+                all_user_totals.get(user_id, 0),
+                int(row.get("user_total_activities") or 0),
+            )
+
+        if not show_completed:
+            rows = [
+                row
+                for row in rows
+                if not (
+                    int(row.get("total_pages") or 0) > 0
+                    and self._progress_percent(row.get("pages_read"), row.get("total_pages")) >= 100
+                )
+            ]
+
         all_grouped_rows = {}
         for row in rows:
             all_grouped_rows.setdefault(row["username"], []).append(row)
 
         grouped_rows = {}
         for username in sorted(all_grouped_rows, key=lambda value: str(value).casefold()):
-            user_rows = sorted(
-                all_grouped_rows[username],
-                key=lambda row: (
+            if default_sort == "progress":
+                sort_key = lambda row: (
+                    self._progress_percent(row.get("pages_read"), row.get("total_pages")),
+                    str(row.get("last_read_at") or ""),
+                )
+            else:
+                sort_key = lambda row: (
                     str(row.get("last_read_at") or ""),
                     int(row.get("progress_id") or row.get("book_id") or 0),
-                ),
-                reverse=True,
-            )
+                )
+            user_rows = sorted(all_grouped_rows[username], key=sort_key, reverse=True)
             grouped_rows[username] = user_rows[:safe_limit]
 
         if not grouped_rows:
-            return {"success": True, "items": [self._empty_state_item()]}
+            return {
+                "success": True,
+                "items": [self._empty_state_item()],
+                "summary": {
+                    "users": len(all_user_totals),
+                    "total_activities": sum(all_user_totals.values()),
+                    "displayed_activities": 0,
+                    "in_progress": 0,
+                    "completed": 0,
+                },
+                "preferences": {
+                    "default_sort": default_sort,
+                    "show_completed": show_completed,
+                    "show_user_summary": show_user_summary,
+                },
+            }
 
         items = []
+        activity_rows = [row for user_rows in grouped_rows.values() for row in user_rows]
+        completed_count = sum(
+            1
+            for row in activity_rows
+            if int(row.get("total_pages") or 0) > 0
+            and self._progress_percent(row.get("pages_read"), row.get("total_pages")) >= 100
+        )
+        summary = {
+            "users": len(all_user_totals),
+            "total_activities": sum(all_user_totals.values()),
+            "displayed_activities": len(activity_rows),
+            "in_progress": len(activity_rows) - completed_count,
+            "completed": completed_count,
+        }
         if self.show_overall_summary:
-            total_activity_count = sum(
-                int(user_rows[0]["user_total_activities"] or 0)
-                for user_rows in grouped_rows.values()
-                if user_rows
-            )
             items.append(
                 {
                     "item_type": "metric",
                     "metric": "<strong>전체 활동 요약</strong>",
                     "value": (
                         "사용자 "
-                        f'<span style="color:#38bdf8;font-weight:700">{len(grouped_rows)}명</span>'
+                        f'<span style="color:#38bdf8;font-weight:700">{summary["users"]}명</span>'
                         " · 열람 기록 "
-                        f'<span style="color:#c084fc;font-weight:700">{total_activity_count}건</span>'
+                        f'<span style="color:#c084fc;font-weight:700">{summary["total_activities"]}건</span>'
                     ),
                     "description": f"사용자별 최근 최대 <strong>{safe_limit}권</strong> 표시",
                 }
@@ -352,19 +505,21 @@ class ActivityMetadataProvider(BaseMetadataProvider):
         for username, user_rows in grouped_rows.items():
             user_total = int(user_rows[0]["user_total_activities"] or 0)
             safe_username = escape(str(username or ""), quote=True)
-            items.append(
-                {
-                    "item_type": "metric",
-                    "metric": f"👤 <strong>{safe_username}</strong>",
-                    "value": (
-                        "최근 "
-                        f'<span style="color:#c084fc;font-weight:700">{len(user_rows)}건</span>'
-                        f" 표시 <small>/ 전체 {user_total}건</small>"
-                    ),
-                    "description": "마지막 열람 시각 <strong>내림차순</strong>",
-                }
-            )
+            if show_user_summary:
+                items.append(
+                    {
+                        "item_type": "metric",
+                        "metric": f"👤 <strong>{safe_username}</strong>",
+                        "value": (
+                            "최근 "
+                            f'<span style="color:#c084fc;font-weight:700">{len(user_rows)}건</span>'
+                            f" 표시 <small>/ 전체 {user_total}건</small>"
+                        ),
+                        "description": "사용자 활동 요약",
+                    }
+                )
             for row in user_rows:
+                progress_percent = self._progress_percent(row["pages_read"], row["total_pages"])
                 items.append(
                     {
                         "title": row["title"],
@@ -376,7 +531,24 @@ class ActivityMetadataProvider(BaseMetadataProvider):
                         "link": "#",
                         "series_name": row["series_name"] or row["title"],
                         "library_id": row["library_id"],
+                        "book_id": row["book_id"],
+                        "username": str(row["username"] or ""),
+                        "pages_read": max(0, int(row["pages_read"] or 0)),
+                        "total_pages": max(0, int(row["total_pages"] or 0)),
+                        "progress_percent": progress_percent,
+                        "is_completed": bool(int(row["total_pages"] or 0) > 0 and progress_percent >= 100),
+                        "last_read_at": str(row["last_read_at"] or ""),
+                        "user_total_activities": user_total,
                     }
                 )
 
-        return {"success": True, "items": items}
+        return {
+            "success": True,
+            "items": items,
+            "summary": summary,
+            "preferences": {
+                "default_sort": default_sort,
+                "show_completed": show_completed,
+                "show_user_summary": show_user_summary,
+            },
+        }

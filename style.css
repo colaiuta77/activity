@@ -1,0 +1,319 @@
+/* 사용자 활동 풀페이지 화면의 테마 연동 레이아웃을 정의합니다. */
+.activity-page {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 24px;
+  color: var(--app-text-primary);
+}
+
+.activity-hero {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding-bottom: 22px;
+  border-bottom: 1px solid var(--app-border-light);
+}
+
+.activity-eyebrow {
+  margin: 0 0 8px;
+  color: var(--app-accent);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+}
+
+.activity-hero h1 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: clamp(1.45rem, 3vw, 2rem);
+}
+
+.activity-hero h1 i {
+  color: var(--app-accent);
+}
+
+.activity-hero p:last-child {
+  margin: 8px 0 0;
+  color: var(--app-text-muted);
+}
+
+.activity-refresh,
+.activity-toolbar select {
+  border: 1px solid var(--app-border);
+  border-radius: 9px;
+  background: var(--app-input-bg);
+  color: var(--app-text-primary);
+  font: inherit;
+}
+
+.activity-refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  cursor: pointer;
+}
+
+.activity-refresh:hover {
+  border-color: var(--app-accent);
+  background: var(--app-bg-card-hover);
+}
+
+.activity-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  margin: 22px 0;
+}
+
+.activity-summary-card {
+  display: flex;
+  min-height: 84px;
+  flex-direction: column;
+  justify-content: center;
+  padding: 18px;
+  border: 1px solid var(--app-border);
+  border-radius: 12px;
+  background: var(--app-bg-card);
+  box-shadow: var(--app-shadow, none);
+}
+
+.activity-summary-card span {
+  color: var(--app-text-muted);
+  font-size: 0.78rem;
+}
+
+.activity-summary-card strong {
+  margin-top: 4px;
+  color: var(--app-accent);
+  font-size: 1.55rem;
+}
+
+.activity-toolbar {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(160px, 220px));
+  gap: 12px;
+  margin-bottom: 24px;
+  padding: 16px;
+  border: 1px solid var(--app-border);
+  border-radius: 12px;
+  background: var(--app-bg-card);
+}
+
+.activity-toolbar label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.activity-toolbar label > span {
+  color: var(--app-text-muted);
+  font-size: 0.75rem;
+  font-weight: 700;
+}
+
+.activity-toolbar select {
+  min-height: 40px;
+  padding: 8px 10px;
+}
+
+.activity-state {
+  padding: 48px 20px;
+  color: var(--app-text-muted);
+  text-align: center;
+}
+
+.activity-state i {
+  margin-right: 8px;
+  color: var(--app-accent);
+}
+
+.activity-users {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.activity-user-section {
+  padding: 20px;
+  border: 1px solid var(--app-border);
+  border-radius: 14px;
+  background: var(--app-bg-card);
+  box-shadow: var(--app-shadow, none);
+}
+
+.activity-user-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.activity-user-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.activity-user-avatar {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--app-accent) 16%, transparent);
+  color: var(--app-accent);
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.activity-user-count {
+  color: var(--app-text-muted);
+  font-size: 0.78rem;
+}
+
+.activity-book-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(310px, 1fr));
+  gap: 12px;
+}
+
+.activity-book-card {
+  display: flex;
+  gap: 14px;
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--app-border-light);
+  border-radius: 10px;
+  background: var(--app-bg-sidebar);
+  cursor: pointer;
+  transition: background-color 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+}
+
+.activity-book-card:hover,
+.activity-book-card:focus-visible {
+  border-color: var(--app-accent);
+  background: var(--app-bg-card-hover);
+  transform: translateY(-1px);
+  outline: none;
+}
+
+.activity-cover {
+  width: 64px;
+  height: 92px;
+  flex: 0 0 auto;
+  border-radius: 5px;
+  object-fit: cover;
+  background: var(--app-bg-card);
+}
+
+.activity-book-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.activity-book-topline {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.activity-book-title {
+  overflow: hidden;
+  margin: 0;
+  color: var(--app-text-primary);
+  font-size: 0.94rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-status-badge {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--app-accent) 15%, transparent);
+  color: var(--app-accent);
+  font-size: 0.68rem;
+  font-weight: 800;
+}
+
+.activity-status-badge.is-complete {
+  background: color-mix(in srgb, var(--app-text-secondary) 15%, transparent);
+  color: var(--app-text-secondary);
+}
+
+.activity-progress-row,
+.activity-book-time {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--app-text-muted);
+  font-size: 0.74rem;
+}
+
+.activity-progress-row {
+  margin-top: auto;
+}
+
+.activity-progress-track {
+  height: 7px;
+  margin: 8px 0 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--app-border-light);
+}
+
+.activity-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--app-accent);
+}
+
+.activity-book-time {
+  justify-content: flex-start;
+}
+
+@media (max-width: 820px) {
+  .activity-page {
+    padding: 16px;
+  }
+
+  .activity-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .activity-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .activity-book-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 520px) {
+  .activity-hero {
+    flex-direction: column;
+  }
+
+  .activity-refresh {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .activity-user-section {
+    padding: 14px;
+  }
+}
