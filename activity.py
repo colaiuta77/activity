@@ -6,7 +6,7 @@ from urllib.parse import quote
 
 from plugins.metadata.base import BaseMetadataProvider
 
-PLUGIN_VERSION = "1.2.0"
+PLUGIN_VERSION = "1.2.3"
 logger = logging.getLogger(__name__)
 
 
@@ -428,7 +428,9 @@ class ActivityMetadataProvider(BaseMetadataProvider):
         show_completed = self._config_bool(config, "SHOW_COMPLETED", True)
         show_user_summary = self._config_bool(config, "SHOW_USER_SUMMARY", True)
         gateway = self.get_db_gateway(db_type)
-        is_audiobook = str(db_type or "").strip().lower() == "audiobook"
+        requested_db_type = str(db_type or "general").strip().lower()
+        normalized_db_type = requested_db_type if requested_db_type in {"adult", "audiobook"} else "general"
+        is_audiobook = normalized_db_type == "audiobook"
         if is_audiobook:
             rows = gateway.fetch_all(
                 """
@@ -436,7 +438,6 @@ class ActivityMetadataProvider(BaseMetadataProvider):
                     user_id,
                     book_id,
                     progress_id,
-                    username,
                     title,
                     series_name,
                     library_id,
@@ -453,7 +454,6 @@ class ActivityMetadataProvider(BaseMetadataProvider):
                         p.user_id AS user_id,
                         p.audiobook_id AS book_id,
                         p.id AS progress_id,
-                        u.username,
                         a.title,
                         a.title AS series_name,
                         a.library_id,
@@ -470,12 +470,11 @@ class ActivityMetadataProvider(BaseMetadataProvider):
                             ORDER BY p.last_listened_at DESC, p.id DESC
                         ) AS user_row_number
                     FROM audiobook_progress p
-                    JOIN users u ON u.id = p.user_id
                     JOIN audiobooks a ON a.id = p.audiobook_id
                     WHERE COALESCE(a.is_deleted, 0) = 0
                 ) ranked_activity
                 WHERE user_row_number <= ?
-                ORDER BY username COLLATE NOCASE ASC, last_read_at DESC, progress_id DESC
+                ORDER BY user_id ASC, last_read_at DESC, progress_id DESC
                 """,
                 (safe_limit,),
             )
@@ -528,7 +527,17 @@ class ActivityMetadataProvider(BaseMetadataProvider):
             )
 
         rows = [dict(row) for row in rows]
-        if not is_audiobook:
+        if is_audiobook:
+            general_gateway = self.get_db_gateway("general")
+            general_users = general_gateway.fetch_all("SELECT id, username FROM users") or []
+            usernames_by_id = {
+                int(user["id"]): str(user["username"] or "")
+                for user in general_users
+            }
+            for row in rows:
+                user_id = int(row["user_id"])
+                row["username"] = usernames_by_id.get(user_id) or f"사용자 #{user_id}"
+        else:
             rows = self._merge_pending_progress(gateway, rows, self._get_pending_progress(db_type))
         all_user_totals = {}
         for row in rows:
@@ -663,6 +672,7 @@ class ActivityMetadataProvider(BaseMetadataProvider):
                         "last_read_at": str(row["last_read_at"] or ""),
                         "user_total_activities": user_total,
                         "media_type": row.get("media_type") or "book",
+                        "db_type": normalized_db_type,
                         "current_seconds": max(0, int(float(row["pages_read"] or 0))) if is_audiobook else 0,
                         "total_seconds": max(0, int(float(row["total_pages"] or 0))) if is_audiobook else 0,
                     }
