@@ -111,6 +111,23 @@
     return items;
   }
 
+  function normalizeLibraryType(value) {
+    return value === 'adult' || value === 'audiobook' ? value : 'general';
+  }
+
+  async function synchronizeLibraryType(dbType) {
+    const targetType = normalizeLibraryType(dbType);
+    if (window.currentLibraryType === targetType) return;
+    if (typeof window.switchLibraryType !== 'function') {
+      throw new Error('BookOasis 서재 전환 함수를 찾을 수 없습니다.');
+    }
+
+    await window.switchLibraryType(targetType);
+    if (window.currentLibraryType !== targetType) {
+      throw new Error('선택한 서재로 전환하지 못했습니다.');
+    }
+  }
+
   function createBookCard(item) {
     const card = document.createElement('article');
     card.className = 'activity-book-card';
@@ -137,7 +154,8 @@
     title.title = item.title || '제목 없음';
     const badge = document.createElement('span');
     badge.className = `activity-status-badge${item.is_completed ? ' is-complete' : ''}`;
-    const isAudiobook = item.media_type === 'audiobook';
+    const itemDbType = normalizeLibraryType(item.db_type || pageState.dbType);
+    const isAudiobook = itemDbType === 'audiobook';
     badge.textContent = item.is_completed ? (isAudiobook ? '완청' : '완독') : (isAudiobook ? '청취 중' : '진행 중');
     topLine.append(title, badge);
 
@@ -181,19 +199,21 @@
     main.append(topLine, progressTrack, progressRow, time);
     card.append(cover, main);
 
-    const openDetail = (event) => {
-      if (isAudiobook && typeof window.openAudioPlayer === 'function') {
-        window.openAudioPlayer(item.book_id);
-        return;
-      }
-      if (typeof window.openBookDetail === 'function') {
-        window.openBookDetail(
-          event,
-          item.series_name || item.title || '',
-          item.library_id || null,
-          item.book_id || null,
-          item.title || ''
-        );
+    const openDetail = async () => {
+      try {
+        if (typeof window.openBookDetail === 'function') {
+          await synchronizeLibraryType(itemDbType);
+          window.openBookDetail(
+            null,
+            item.series_name || item.title || '',
+            item.library_id || null,
+            item.book_id || null,
+            item.title || ''
+          );
+        }
+      } catch (error) {
+        console.error('[Activity] 도서 상세 이동 실패:', error);
+        window.alert?.(error.message || '도서 상세 화면으로 이동하지 못했습니다.');
       }
     };
     card.addEventListener('click', openDetail);
