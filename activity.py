@@ -6,7 +6,7 @@ from urllib.parse import quote
 
 from plugins.metadata.base import BaseMetadataProvider
 
-PLUGIN_VERSION = "1.1.0"
+PLUGIN_VERSION = "1.2.0"
 logger = logging.getLogger(__name__)
 
 
@@ -144,7 +144,18 @@ class ActivityMetadataProvider(BaseMetadataProvider):
         return f"/covers/{quote(str(cover_image), safe='/')}"
 
     @staticmethod
-    def _empty_state_item():
+    def _audiobook_cover_url(audiobook_id):
+        return f"/api/media/audiobooks/{int(audiobook_id)}/cover"
+
+    @staticmethod
+    def _empty_state_item(is_audiobook=False):
+        if is_audiobook:
+            return {
+                "item_type": "metric",
+                "metric": "<strong>최근 사용자 활동</strong>",
+                "value": "아무도 청취한 오디오북이 없습니다.",
+                "description": "오디오북을 청취하면 사용자별 최근 활동이 여기에 표시됩니다.",
+            }
         return {
             "item_type": "metric",
             "metric": "📖 <strong>최근 사용자 활동</strong>",
@@ -188,6 +199,37 @@ class ActivityMetadataProvider(BaseMetadataProvider):
         )
 
     @staticmethod
+    def _duration_text(seconds):
+        total_seconds = max(0, int(float(seconds or 0)))
+        if total_seconds < 60:
+            return f"{total_seconds}초"
+        minutes = total_seconds // 60
+        if minutes < 60:
+            return f"{minutes}분"
+        hours, remaining_minutes = divmod(minutes, 60)
+        return f"{hours}시간 {remaining_minutes}분" if remaining_minutes else f"{hours}시간"
+
+    @classmethod
+    def _audio_progress_text(cls, current_seconds, total_seconds, progress_percent, completed):
+        label = "완청" if completed else "청취"
+        current = cls._duration_text(current_seconds)
+        total = cls._duration_text(total_seconds)
+        duration = f"{current}/{total}" if int(float(total_seconds or 0)) > 0 else current
+        return f"{label} · {duration} · {progress_percent}%"
+
+    @classmethod
+    def _audio_progress_html(cls, current_seconds, total_seconds, progress_percent, completed):
+        label = "완청" if completed else "청취"
+        color = "#4ade80" if completed else "#c084fc"
+        current = cls._duration_text(current_seconds)
+        total = cls._duration_text(total_seconds)
+        duration = f"{current}/{total}" if int(float(total_seconds or 0)) > 0 else current
+        return (
+            f'<span style="color:{color};font-weight:700">{label} {progress_percent}%</span>'
+            f"<br><small>{duration}</small>"
+        )
+
+    @staticmethod
     def _format_date(last_read_at):
         value = str(last_read_at or "").replace("T", " ")
         return value[:16]
@@ -223,6 +265,20 @@ class ActivityMetadataProvider(BaseMetadataProvider):
         pages = max(0, int(pages_read or 0))
         total = max(0, int(total_pages or 0))
         return min(100, round((pages / total) * 100)) if total else 0
+
+    @classmethod
+    def _row_progress_percent(cls, row):
+        override = row.get("progress_percent_override")
+        if override is not None:
+            try:
+                return max(0, min(100, round(float(override))))
+            except (TypeError, ValueError):
+                pass
+        return cls._progress_percent(row.get("pages_read"), row.get("total_pages"))
+
+    @classmethod
+    def _row_is_completed(cls, row):
+        return bool(int(row.get("is_completed") or 0) or cls._row_progress_percent(row) >= 100)
 
     @staticmethod
     def _get_pending_progress(db_type):
@@ -372,51 +428,108 @@ class ActivityMetadataProvider(BaseMetadataProvider):
         show_completed = self._config_bool(config, "SHOW_COMPLETED", True)
         show_user_summary = self._config_bool(config, "SHOW_USER_SUMMARY", True)
         gateway = self.get_db_gateway(db_type)
-        rows = gateway.fetch_all(
-            """
-            SELECT
-                user_id,
-                book_id,
-                progress_id,
-                username,
-                title,
-                series_name,
-                library_id,
-                cover_image,
-                pages_read,
-                total_pages,
-                last_read_at,
-                user_total_activities
-            FROM (
+        is_audiobook = str(db_type or "").strip().lower() == "audiobook"
+        if is_audiobook:
+            rows = gateway.fetch_all(
+                """
                 SELECT
-                    p.user_id AS user_id,
-                    p.book_id AS book_id,
-                    p.id AS progress_id,
-                    u.username,
-                    b.title,
-                    b.series_name,
-                    b.library_id,
-                    b.cover_image,
-                    p.pages_read,
-                    b.total_pages,
-                    p.last_read_at,
-                    COUNT(*) OVER (PARTITION BY p.user_id) AS user_total_activities,
-                    ROW_NUMBER() OVER (
-                        PARTITION BY p.user_id
-                        ORDER BY p.last_read_at DESC, p.id DESC
-                    ) AS user_row_number
-                FROM user_progress p
-                JOIN users u ON u.id = p.user_id
-                JOIN books b ON b.id = p.book_id
-                WHERE COALESCE(b.is_deleted, 0) = 0
-            ) ranked_activity
-            WHERE user_row_number <= ?
-            ORDER BY username COLLATE NOCASE ASC, last_read_at DESC, progress_id DESC
-            """,
-            (safe_limit,),
-        )
+                    user_id,
+                    book_id,
+                    progress_id,
+                    username,
+                    title,
+                    series_name,
+                    library_id,
+                    cover_image,
+                    pages_read,
+                    total_pages,
+                    last_read_at,
+                    user_total_activities,
+                    progress_percent_override,
+                    is_completed,
+                    media_type
+                FROM (
+                    SELECT
+                        p.user_id AS user_id,
+                        p.audiobook_id AS book_id,
+                        p.id AS progress_id,
+                        u.username,
+                        a.title,
+                        a.title AS series_name,
+                        a.library_id,
+                        a.poster AS cover_image,
+                        p.current_time AS pages_read,
+                        a.total_duration AS total_pages,
+                        p.last_listened_at AS last_read_at,
+                        p.total_progress_pct AS progress_percent_override,
+                        p.is_completed,
+                        'audiobook' AS media_type,
+                        COUNT(*) OVER (PARTITION BY p.user_id) AS user_total_activities,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY p.user_id
+                            ORDER BY p.last_listened_at DESC, p.id DESC
+                        ) AS user_row_number
+                    FROM audiobook_progress p
+                    JOIN users u ON u.id = p.user_id
+                    JOIN audiobooks a ON a.id = p.audiobook_id
+                    WHERE COALESCE(a.is_deleted, 0) = 0
+                ) ranked_activity
+                WHERE user_row_number <= ?
+                ORDER BY username COLLATE NOCASE ASC, last_read_at DESC, progress_id DESC
+                """,
+                (safe_limit,),
+            )
+        else:
+            rows = gateway.fetch_all(
+                """
+                SELECT
+                    user_id,
+                    book_id,
+                    progress_id,
+                    username,
+                    title,
+                    series_name,
+                    library_id,
+                    cover_image,
+                    pages_read,
+                    total_pages,
+                    last_read_at,
+                    user_total_activities,
+                    NULL AS progress_percent_override,
+                    0 AS is_completed,
+                    'book' AS media_type
+                FROM (
+                    SELECT
+                        p.user_id AS user_id,
+                        p.book_id AS book_id,
+                        p.id AS progress_id,
+                        u.username,
+                        b.title,
+                        b.series_name,
+                        b.library_id,
+                        b.cover_image,
+                        p.pages_read,
+                        b.total_pages,
+                        p.last_read_at,
+                        COUNT(*) OVER (PARTITION BY p.user_id) AS user_total_activities,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY p.user_id
+                            ORDER BY p.last_read_at DESC, p.id DESC
+                        ) AS user_row_number
+                    FROM user_progress p
+                    JOIN users u ON u.id = p.user_id
+                    JOIN books b ON b.id = p.book_id
+                    WHERE COALESCE(b.is_deleted, 0) = 0
+                ) ranked_activity
+                WHERE user_row_number <= ?
+                ORDER BY username COLLATE NOCASE ASC, last_read_at DESC, progress_id DESC
+                """,
+                (safe_limit,),
+            )
 
-        rows = self._merge_pending_progress(gateway, rows, self._get_pending_progress(db_type))
+        rows = [dict(row) for row in rows]
+        if not is_audiobook:
+            rows = self._merge_pending_progress(gateway, rows, self._get_pending_progress(db_type))
         all_user_totals = {}
         for row in rows:
             user_id = int(row["user_id"])
@@ -429,10 +542,7 @@ class ActivityMetadataProvider(BaseMetadataProvider):
             rows = [
                 row
                 for row in rows
-                if not (
-                    int(row.get("total_pages") or 0) > 0
-                    and self._progress_percent(row.get("pages_read"), row.get("total_pages")) >= 100
-                )
+                if not self._row_is_completed(row)
             ]
 
         all_grouped_rows = {}
@@ -443,7 +553,7 @@ class ActivityMetadataProvider(BaseMetadataProvider):
         for username in sorted(all_grouped_rows, key=lambda value: str(value).casefold()):
             if default_sort == "progress":
                 sort_key = lambda row: (
-                    self._progress_percent(row.get("pages_read"), row.get("total_pages")),
+                    self._row_progress_percent(row),
                     str(row.get("last_read_at") or ""),
                 )
             else:
@@ -457,7 +567,7 @@ class ActivityMetadataProvider(BaseMetadataProvider):
         if not grouped_rows:
             return {
                 "success": True,
-                "items": [self._empty_state_item()],
+                "items": [self._empty_state_item(is_audiobook=is_audiobook)],
                 "summary": {
                     "users": len(all_user_totals),
                     "total_activities": sum(all_user_totals.values()),
@@ -477,8 +587,7 @@ class ActivityMetadataProvider(BaseMetadataProvider):
         completed_count = sum(
             1
             for row in activity_rows
-            if int(row.get("total_pages") or 0) > 0
-            and self._progress_percent(row.get("pages_read"), row.get("total_pages")) >= 100
+            if self._row_is_completed(row)
         )
         summary = {
             "users": len(all_user_totals),
@@ -488,6 +597,7 @@ class ActivityMetadataProvider(BaseMetadataProvider):
             "completed": completed_count,
         }
         if self.show_overall_summary:
+            activity_label = "청취 기록" if is_audiobook else "열람 기록"
             items.append(
                 {
                     "item_type": "metric",
@@ -495,7 +605,7 @@ class ActivityMetadataProvider(BaseMetadataProvider):
                     "value": (
                         "사용자 "
                         f'<span style="color:#38bdf8;font-weight:700">{summary["users"]}명</span>'
-                        " · 열람 기록 "
+                        f" · {activity_label} "
                         f'<span style="color:#c084fc;font-weight:700">{summary["total_activities"]}건</span>'
                     ),
                     "description": f"사용자별 최근 최대 <strong>{safe_limit}권</strong> 표시",
@@ -519,15 +629,28 @@ class ActivityMetadataProvider(BaseMetadataProvider):
                     }
                 )
             for row in user_rows:
-                progress_percent = self._progress_percent(row["pages_read"], row["total_pages"])
+                progress_percent = self._row_progress_percent(row)
+                completed = self._row_is_completed(row)
+                if row.get("media_type") == "audiobook":
+                    progress_text = self._audio_progress_text(
+                        row["pages_read"], row["total_pages"], progress_percent, completed
+                    )
+                    progress_html = self._audio_progress_html(
+                        row["pages_read"], row["total_pages"], progress_percent, completed
+                    )
+                    cover_url = self._audiobook_cover_url(row["book_id"])
+                else:
+                    progress_text = self._progress_text(row["pages_read"], row["total_pages"])
+                    progress_html = self._progress_html(row["pages_read"], row["total_pages"])
+                    cover_url = self._cover_url(row["cover_image"])
                 items.append(
                     {
                         "title": row["title"],
                         "author": f"👤 {row['username']}",
-                        "publisher": self._progress_text(row["pages_read"], row["total_pages"]),
+                        "publisher": progress_text,
                         "pubDate": self._format_date(row["last_read_at"]),
-                        "cover": self._cover_url(row["cover_image"]),
-                        "description": self._progress_html(row["pages_read"], row["total_pages"]),
+                        "cover": cover_url,
+                        "description": progress_html,
                         "link": "#",
                         "series_name": row["series_name"] or row["title"],
                         "library_id": row["library_id"],
@@ -536,9 +659,12 @@ class ActivityMetadataProvider(BaseMetadataProvider):
                         "pages_read": max(0, int(row["pages_read"] or 0)),
                         "total_pages": max(0, int(row["total_pages"] or 0)),
                         "progress_percent": progress_percent,
-                        "is_completed": bool(int(row["total_pages"] or 0) > 0 and progress_percent >= 100),
+                        "is_completed": completed,
                         "last_read_at": str(row["last_read_at"] or ""),
                         "user_total_activities": user_total,
+                        "media_type": row.get("media_type") or "book",
+                        "current_seconds": max(0, int(float(row["pages_read"] or 0))) if is_audiobook else 0,
+                        "total_seconds": max(0, int(float(row["total_pages"] or 0))) if is_audiobook else 0,
                     }
                 )
 

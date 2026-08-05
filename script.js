@@ -7,6 +7,7 @@
 
   const elements = {
     refresh: root.querySelector('#activity-refresh'),
+    libraryButtons: [...root.querySelectorAll('.activity-library-btn')],
     user: root.querySelector('#activity-user-filter'),
     period: root.querySelector('#activity-period-filter'),
     sort: root.querySelector('#activity-sort-filter'),
@@ -16,12 +17,16 @@
     summaryTotal: root.querySelector('#activity-summary-total'),
     summaryProgress: root.querySelector('#activity-summary-progress'),
     summaryCompleted: root.querySelector('#activity-summary-completed'),
+    summaryTotalLabel: root.querySelector('#activity-summary-total-label'),
+    summaryProgressLabel: root.querySelector('#activity-summary-progress-label'),
+    summaryCompletedLabel: root.querySelector('#activity-summary-completed-label'),
   };
   const pageState = {
-    dbType: document.getElementById('btn-lib-adult')?.classList.contains('active') ? 'adult' : 'general',
+    dbType: root.querySelector('.activity-library-btn.active')?.dataset.type || 'general',
     items: [],
     summary: {},
     preferences: {},
+    requestId: 0,
   };
 
   function number(value) {
@@ -33,6 +38,16 @@
     if (!value) return '열람 시각 없음';
     const normalized = String(value).replace('T', ' ');
     return normalized.slice(0, 16);
+  }
+
+  function formatDuration(value) {
+    const seconds = Math.max(0, Math.floor(number(value)));
+    if (seconds < 60) return `${seconds}초`;
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes}분`;
+    const hours = Math.floor(minutes / 60);
+    const remainder = minutes % 60;
+    return remainder ? `${hours}시간 ${remainder}분` : `${hours}시간`;
   }
 
   function activityTimestamp(item) {
@@ -122,7 +137,8 @@
     title.title = item.title || '제목 없음';
     const badge = document.createElement('span');
     badge.className = `activity-status-badge${item.is_completed ? ' is-complete' : ''}`;
-    badge.textContent = item.is_completed ? '완독' : '진행 중';
+    const isAudiobook = item.media_type === 'audiobook';
+    badge.textContent = item.is_completed ? (isAudiobook ? '완청' : '완독') : (isAudiobook ? '청취 중' : '진행 중');
     topLine.append(title, badge);
 
     const progressTrack = document.createElement('div');
@@ -139,9 +155,15 @@
     const progressRow = document.createElement('div');
     progressRow.className = 'activity-progress-row';
     const pages = document.createElement('span');
-    pages.textContent = number(item.total_pages)
-      ? `${number(item.pages_read).toLocaleString()}/${number(item.total_pages).toLocaleString()}페이지`
-      : `${number(item.pages_read).toLocaleString()}페이지`;
+    if (isAudiobook) {
+      pages.textContent = number(item.total_seconds)
+        ? `${formatDuration(item.current_seconds)}/${formatDuration(item.total_seconds)}`
+        : formatDuration(item.current_seconds);
+    } else {
+      pages.textContent = number(item.total_pages)
+        ? `${number(item.pages_read).toLocaleString()}/${number(item.total_pages).toLocaleString()}페이지`
+        : `${number(item.pages_read).toLocaleString()}페이지`;
+    }
     const percent = document.createElement('strong');
     percent.textContent = `${number(item.progress_percent)}%`;
     progressRow.append(pages, percent);
@@ -160,6 +182,10 @@
     card.append(cover, main);
 
     const openDetail = (event) => {
+      if (isAudiobook && typeof window.openAudioPlayer === 'function') {
+        window.openAudioPlayer(item.book_id);
+        return;
+      }
       if (typeof window.openBookDetail === 'function') {
         window.openBookDetail(
           event,
@@ -189,6 +215,10 @@
     setText(elements.summaryTotal, allFilters ? number(pageState.summary.total_activities).toLocaleString() : items.length.toLocaleString());
     setText(elements.summaryProgress, (items.length - completed).toLocaleString());
     setText(elements.summaryCompleted, completed.toLocaleString());
+    const isAudiobook = pageState.dbType === 'audiobook';
+    setText(elements.summaryTotalLabel, isAudiobook ? '전체 청취 기록' : '전체 열람 기록');
+    setText(elements.summaryProgressLabel, isAudiobook ? '청취 중' : '진행 중');
+    setText(elements.summaryCompletedLabel, isAudiobook ? '완청' : '완독');
 
     if (!items.length) {
       showState('선택한 조건에 맞는 사용자 활동이 없습니다.', 'fa-solid fa-book-open');
@@ -235,11 +265,16 @@
   }
 
   async function loadActivity() {
+    const requestId = ++pageState.requestId;
     elements.refresh.disabled = true;
+    elements.libraryButtons.forEach((button) => {
+      button.disabled = true;
+    });
     showState('활동 데이터를 불러오는 중입니다.', 'fa-solid fa-circle-notch fa-spin');
     try {
       const response = await fetch(`/api/media/dashboard/widgets/activity/data?type=${encodeURIComponent(pageState.dbType)}&limit=100`);
       const data = await response.json();
+      if (requestId !== pageState.requestId) return;
       if (!response.ok || !data.success) throw new Error(data.error || '활동 데이터를 불러오지 못했습니다.');
       pageState.items = Array.isArray(data.items) ? data.items.filter((item) => !item.item_type && item.username) : [];
       pageState.summary = data.summary || {};
@@ -248,11 +283,32 @@
       updateUserOptions(pageState.items);
       render();
     } catch (error) {
+      if (requestId !== pageState.requestId) return;
       showState(error.message || '사용자 활동을 불러오지 못했습니다.', 'fa-solid fa-triangle-exclamation');
     } finally {
-      elements.refresh.disabled = false;
+      if (requestId === pageState.requestId) {
+        elements.refresh.disabled = false;
+        elements.libraryButtons.forEach((button) => {
+          button.disabled = false;
+        });
+      }
     }
   }
+
+  elements.libraryButtons.forEach((button) => {
+    button.addEventListener('click', () => {
+      const nextType = button.dataset.type || 'general';
+      if (nextType === pageState.dbType) return;
+      pageState.dbType = nextType;
+      elements.libraryButtons.forEach((candidate) => {
+        const isActive = candidate === button;
+        candidate.classList.toggle('active', isActive);
+        candidate.setAttribute('aria-pressed', String(isActive));
+      });
+      elements.user.value = 'all';
+      loadActivity();
+    });
+  });
 
   elements.refresh.addEventListener('click', loadActivity);
   elements.user.addEventListener('change', render);
