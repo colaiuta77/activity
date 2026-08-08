@@ -6,7 +6,7 @@ from urllib.parse import quote
 
 from plugins.metadata.base import BaseMetadataProvider
 
-PLUGIN_VERSION = "1.2.3"
+PLUGIN_VERSION = "1.3.0"
 logger = logging.getLogger(__name__)
 
 
@@ -105,11 +105,11 @@ class ActivityMetadataProvider(BaseMetadataProvider):
         except (TypeError, ValueError):
             return {"success": False, "error": "도서 식별자가 올바르지 않습니다."}
 
-        rows = self.get_db_gateway(db_type).fetch_all(
+        normalized_db_type = self._normalize_db_type(db_type)
+        rows = self.get_db_gateway(normalized_db_type).fetch_all(
             """
-            SELECT u.username, p.pages_read, b.total_pages, p.last_read_at
+            SELECT p.user_id, p.pages_read, b.total_pages, p.last_read_at
             FROM user_progress p
-            JOIN users u ON u.id = p.user_id
             JOIN books b ON b.id = p.book_id
             WHERE p.book_id = ? AND COALESCE(b.is_deleted, 0) = 0
             ORDER BY p.last_read_at DESC, p.id DESC
@@ -119,10 +119,13 @@ class ActivityMetadataProvider(BaseMetadataProvider):
         if not rows:
             return {"success": True, "message": "이 책의 열람 활동이 아직 없습니다."}
 
+        usernames_by_id = self._load_general_usernames()
         summaries = []
         for row in rows[:5]:
+            user_id = int(row["user_id"])
+            username = usernames_by_id.get(user_id) or f"사용자 #{user_id}"
             summaries.append(
-                f"{row['username']} · {self._progress_text(row['pages_read'], row['total_pages'])}"
+                f"{username} · {self._progress_text(row['pages_read'], row['total_pages'])}"
             )
         remainder = len(rows) - len(summaries)
         message = "\n".join(summaries)
@@ -261,6 +264,27 @@ class ActivityMetadataProvider(BaseMetadataProvider):
         return bool(value)
 
     @staticmethod
+    def _normalize_db_type(db_type):
+        normalized = str(db_type or "general").strip().lower()
+        return normalized if normalized in {"general", "adult", "audiobook"} else "general"
+
+    def _load_general_usernames(self):
+        rows = self.get_db_gateway("general").fetch_all(
+            "SELECT id, username FROM users ORDER BY id ASC"
+        ) or []
+        return {
+            int(row["id"]): str(row.get("username") or "")
+            for row in (dict(raw_row) for raw_row in rows)
+        }
+
+    def _attach_usernames(self, rows):
+        usernames_by_id = self._load_general_usernames()
+        for row in rows:
+            user_id = int(row["user_id"])
+            row["username"] = usernames_by_id.get(user_id) or f"사용자 #{user_id}"
+        return rows
+
+    @staticmethod
     def _progress_percent(pages_read, total_pages):
         pages = max(0, int(pages_read or 0))
         total = max(0, int(total_pages or 0))
@@ -329,9 +353,8 @@ class ActivityMetadataProvider(BaseMetadataProvider):
             """
             SELECT
                 p.id AS progress_id,
-                u.id AS user_id,
+                ? AS user_id,
                 b.id AS book_id,
-                u.username,
                 b.title,
                 b.series_name,
                 b.library_id,
@@ -343,16 +366,15 @@ class ActivityMetadataProvider(BaseMetadataProvider):
                     SELECT COUNT(*)
                     FROM user_progress all_progress
                     JOIN books all_books ON all_books.id = all_progress.book_id
-                    WHERE all_progress.user_id = u.id AND COALESCE(all_books.is_deleted, 0) = 0
+                    WHERE all_progress.user_id = ? AND COALESCE(all_books.is_deleted, 0) = 0
                 )
                     AS user_total_activities,
                 CASE WHEN p.id IS NULL THEN 0 ELSE 1 END AS is_persisted
-            FROM users u
-            JOIN books b ON b.id = ?
-            LEFT JOIN user_progress p ON p.book_id = b.id AND p.user_id = u.id
-            WHERE u.id = ? AND COALESCE(b.is_deleted, 0) = 0
+            FROM books b
+            LEFT JOIN user_progress p ON p.book_id = b.id AND p.user_id = ?
+            WHERE b.id = ? AND COALESCE(b.is_deleted, 0) = 0
             """,
-            (book_id, user_id),
+            (user_id, user_id, user_id, book_id),
         )
         return dict(row) if row else None
 
@@ -420,16 +442,15 @@ class ActivityMetadataProvider(BaseMetadataProvider):
             return {"success": True, "items": [self._error_state_item()]}
 
     def _build_dashboard_data(self, db_type, limit=20):
-        config = self._plugin_config(db_type)
-        safe_limit = self._items_per_user(db_type, limit, config=config)
+        normalized_db_type = self._normalize_db_type(db_type)
+        config = self._plugin_config(normalized_db_type)
+        safe_limit = self._items_per_user(normalized_db_type, limit, config=config)
         default_sort = str(config.get("DEFAULT_SORT", "recent") or "recent").strip().lower()
         if default_sort not in {"recent", "progress", "username"}:
             default_sort = "recent"
         show_completed = self._config_bool(config, "SHOW_COMPLETED", True)
         show_user_summary = self._config_bool(config, "SHOW_USER_SUMMARY", True)
-        gateway = self.get_db_gateway(db_type)
-        requested_db_type = str(db_type or "general").strip().lower()
-        normalized_db_type = requested_db_type if requested_db_type in {"adult", "audiobook"} else "general"
+        gateway = self.get_db_gateway(normalized_db_type)
         is_audiobook = normalized_db_type == "audiobook"
         if is_audiobook:
             rows = gateway.fetch_all(
@@ -485,7 +506,6 @@ class ActivityMetadataProvider(BaseMetadataProvider):
                     user_id,
                     book_id,
                     progress_id,
-                    username,
                     title,
                     series_name,
                     library_id,
@@ -502,7 +522,6 @@ class ActivityMetadataProvider(BaseMetadataProvider):
                         p.user_id AS user_id,
                         p.book_id AS book_id,
                         p.id AS progress_id,
-                        u.username,
                         b.title,
                         b.series_name,
                         b.library_id,
@@ -516,29 +535,23 @@ class ActivityMetadataProvider(BaseMetadataProvider):
                             ORDER BY p.last_read_at DESC, p.id DESC
                         ) AS user_row_number
                     FROM user_progress p
-                    JOIN users u ON u.id = p.user_id
                     JOIN books b ON b.id = p.book_id
                     WHERE COALESCE(b.is_deleted, 0) = 0
                 ) ranked_activity
                 WHERE user_row_number <= ?
-                ORDER BY username COLLATE NOCASE ASC, last_read_at DESC, progress_id DESC
+                ORDER BY user_id ASC, last_read_at DESC, progress_id DESC
                 """,
                 (safe_limit,),
             )
 
         rows = [dict(row) for row in rows]
-        if is_audiobook:
-            general_gateway = self.get_db_gateway("general")
-            general_users = general_gateway.fetch_all("SELECT id, username FROM users") or []
-            usernames_by_id = {
-                int(user["id"]): str(user["username"] or "")
-                for user in general_users
-            }
-            for row in rows:
-                user_id = int(row["user_id"])
-                row["username"] = usernames_by_id.get(user_id) or f"사용자 #{user_id}"
-        else:
-            rows = self._merge_pending_progress(gateway, rows, self._get_pending_progress(db_type))
+        if not is_audiobook:
+            rows = self._merge_pending_progress(
+                gateway,
+                rows,
+                self._get_pending_progress(normalized_db_type),
+            )
+        rows = self._attach_usernames(rows)
         all_user_totals = {}
         for row in rows:
             user_id = int(row["user_id"])
