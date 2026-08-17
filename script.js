@@ -112,7 +112,7 @@
   }
 
   function normalizeLibraryType(value) {
-    return value === 'adult' || value === 'audiobook' ? value : 'general';
+    return value === 'adult' || value === 'audiobook' || value === 'video' ? value : 'general';
   }
 
   async function synchronizeLibraryType(dbType) {
@@ -156,7 +156,10 @@
     badge.className = `activity-status-badge${item.is_completed ? ' is-complete' : ''}`;
     const itemDbType = normalizeLibraryType(item.db_type || pageState.dbType);
     const isAudiobook = itemDbType === 'audiobook';
-    badge.textContent = item.is_completed ? (isAudiobook ? '완청' : '완독') : (isAudiobook ? '청취 중' : '진행 중');
+    const isVideo = itemDbType === 'video';
+    badge.textContent = item.is_completed
+      ? (isAudiobook ? '완청' : isVideo ? '시청 완료' : '완독')
+      : (isAudiobook ? '청취 중' : isVideo ? '시청 중' : '진행 중');
     topLine.append(title, badge);
 
     const progressTrack = document.createElement('div');
@@ -177,6 +180,10 @@
       pages.textContent = number(item.total_seconds)
         ? `${formatDuration(item.current_seconds)}/${formatDuration(item.total_seconds)}`
         : formatDuration(item.current_seconds);
+    } else if (isVideo) {
+      pages.textContent = number(item.total_pages)
+        ? `${number(item.pages_read).toLocaleString()}/${number(item.total_pages).toLocaleString()}편`
+        : `${number(item.pages_read).toLocaleString()}편`;
     } else {
       pages.textContent = number(item.total_pages)
         ? `${number(item.pages_read).toLocaleString()}/${number(item.total_pages).toLocaleString()}페이지`
@@ -236,9 +243,10 @@
     setText(elements.summaryProgress, (items.length - completed).toLocaleString());
     setText(elements.summaryCompleted, completed.toLocaleString());
     const isAudiobook = pageState.dbType === 'audiobook';
-    setText(elements.summaryTotalLabel, isAudiobook ? '전체 청취 기록' : '전체 열람 기록');
-    setText(elements.summaryProgressLabel, isAudiobook ? '청취 중' : '진행 중');
-    setText(elements.summaryCompletedLabel, isAudiobook ? '완청' : '완독');
+    const isVideo = pageState.dbType === 'video';
+    setText(elements.summaryTotalLabel, isAudiobook ? '전체 청취 기록' : isVideo ? '전체 시청 기록' : '전체 열람 기록');
+    setText(elements.summaryProgressLabel, isAudiobook ? '청취 중' : isVideo ? '시청 중' : '진행 중');
+    setText(elements.summaryCompletedLabel, isAudiobook ? '완청' : isVideo ? '시청 완료' : '완독');
 
     if (!items.length) {
       showState('선택한 조건에 맞는 사용자 활동이 없습니다.', 'fa-solid fa-book-open');
