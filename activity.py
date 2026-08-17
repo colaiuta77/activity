@@ -6,7 +6,7 @@ from urllib.parse import quote
 
 from plugins.metadata.base import BaseMetadataProvider
 
-PLUGIN_VERSION = "1.3.0"
+PLUGIN_VERSION = "1.4.0"
 logger = logging.getLogger(__name__)
 
 
@@ -64,6 +64,7 @@ class ActivityMetadataProvider(BaseMetadataProvider):
         "title": "사용자 활동",
         "icon": "fa-solid fa-users-viewfinder",
         "order": 80,
+        "sessions": "all",
     }
     update_manifest = {
         "enabled": True,
@@ -83,7 +84,11 @@ class ActivityMetadataProvider(BaseMetadataProvider):
 
     def get_context_menu_items(self, db_type, context):
         context = context or {}
-        if not self._is_admin_request() or not context.get("book_id"):
+        if (
+            not self._is_admin_request()
+            or self._normalize_db_type(db_type) not in {"general", "adult"}
+            or not context.get("book_id")
+        ):
             return []
         return [
             {
@@ -151,13 +156,24 @@ class ActivityMetadataProvider(BaseMetadataProvider):
         return f"/api/media/audiobooks/{int(audiobook_id)}/cover"
 
     @staticmethod
-    def _empty_state_item(is_audiobook=False):
-        if is_audiobook:
+    def _video_cover_url(video_id):
+        return f"/api/media/videos/{int(video_id)}/cover"
+
+    @staticmethod
+    def _empty_state_item(media_type="book"):
+        if media_type == "audiobook":
             return {
                 "item_type": "metric",
                 "metric": "<strong>최근 사용자 활동</strong>",
                 "value": "아무도 청취한 오디오북이 없습니다.",
                 "description": "오디오북을 청취하면 사용자별 최근 활동이 여기에 표시됩니다.",
+            }
+        if media_type == "video":
+            return {
+                "item_type": "metric",
+                "metric": "<strong>최근 사용자 활동</strong>",
+                "value": "아무도 시청한 비디오북이 없습니다.",
+                "description": "비디오북을 시청하면 사용자별 최근 활동이 여기에 표시됩니다.",
             }
         return {
             "item_type": "metric",
@@ -233,6 +249,26 @@ class ActivityMetadataProvider(BaseMetadataProvider):
         )
 
     @staticmethod
+    def _video_progress_text(current_episode, total_episodes, progress_percent, completed):
+        label = "시청 완료" if completed else "시청"
+        current = max(0, int(current_episode or 0))
+        total = max(0, int(total_episodes or 0))
+        episodes = f"{current}/{total}편" if total else f"{current}편"
+        return f"{label} · {episodes} · {progress_percent}%"
+
+    @staticmethod
+    def _video_progress_html(current_episode, total_episodes, progress_percent, completed):
+        label = "시청 완료" if completed else "시청"
+        color = "#4ade80" if completed else "#c084fc"
+        current = max(0, int(current_episode or 0))
+        total = max(0, int(total_episodes or 0))
+        episodes = f"{current}/{total}편" if total else f"{current}편"
+        return (
+            f'<span style="color:{color};font-weight:700">{label} {progress_percent}%</span>'
+            f"<br><small>{episodes}</small>"
+        )
+
+    @staticmethod
     def _format_date(last_read_at):
         value = str(last_read_at or "").replace("T", " ")
         return value[:16]
@@ -266,7 +302,7 @@ class ActivityMetadataProvider(BaseMetadataProvider):
     @staticmethod
     def _normalize_db_type(db_type):
         normalized = str(db_type or "general").strip().lower()
-        return normalized if normalized in {"general", "adult", "audiobook"} else "general"
+        return normalized if normalized in {"general", "adult", "audiobook", "video"} else "general"
 
     def _load_general_usernames(self):
         rows = self.get_db_gateway("general").fetch_all(
@@ -452,6 +488,7 @@ class ActivityMetadataProvider(BaseMetadataProvider):
         show_user_summary = self._config_bool(config, "SHOW_USER_SUMMARY", True)
         gateway = self.get_db_gateway(normalized_db_type)
         is_audiobook = normalized_db_type == "audiobook"
+        is_video = normalized_db_type == "video"
         if is_audiobook:
             rows = gateway.fetch_all(
                 """
@@ -493,6 +530,54 @@ class ActivityMetadataProvider(BaseMetadataProvider):
                     FROM audiobook_progress p
                     JOIN audiobooks a ON a.id = p.audiobook_id
                     WHERE COALESCE(a.is_deleted, 0) = 0
+                ) ranked_activity
+                WHERE user_row_number <= ?
+                ORDER BY user_id ASC, last_read_at DESC, progress_id DESC
+                """,
+                (safe_limit,),
+            )
+        elif is_video:
+            rows = gateway.fetch_all(
+                """
+                SELECT
+                    user_id,
+                    book_id,
+                    progress_id,
+                    title,
+                    series_name,
+                    library_id,
+                    cover_image,
+                    pages_read,
+                    total_pages,
+                    last_read_at,
+                    user_total_activities,
+                    progress_percent_override,
+                    is_completed,
+                    media_type
+                FROM (
+                    SELECT
+                        p.user_id AS user_id,
+                        p.video_id AS book_id,
+                        p.id AS progress_id,
+                        v.title,
+                        v.title AS series_name,
+                        v.library_id,
+                        v.poster AS cover_image,
+                        COALESCE(e.episode_number, 0) AS pages_read,
+                        v.total_episodes AS total_pages,
+                        p.last_watched_at AS last_read_at,
+                        p.total_progress_pct AS progress_percent_override,
+                        p.is_completed,
+                        'video' AS media_type,
+                        COUNT(*) OVER (PARTITION BY p.user_id) AS user_total_activities,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY p.user_id
+                            ORDER BY p.last_watched_at DESC, p.id DESC
+                        ) AS user_row_number
+                    FROM video_progress p
+                    JOIN videos v ON v.id = p.video_id
+                    LEFT JOIN video_episodes e ON e.id = p.current_episode_id
+                    WHERE COALESCE(v.is_deleted, 0) = 0
                 ) ranked_activity
                 WHERE user_row_number <= ?
                 ORDER BY user_id ASC, last_read_at DESC, progress_id DESC
@@ -545,7 +630,7 @@ class ActivityMetadataProvider(BaseMetadataProvider):
             )
 
         rows = [dict(row) for row in rows]
-        if not is_audiobook:
+        if normalized_db_type in {"general", "adult"}:
             rows = self._merge_pending_progress(
                 gateway,
                 rows,
@@ -589,7 +674,8 @@ class ActivityMetadataProvider(BaseMetadataProvider):
         if not grouped_rows:
             return {
                 "success": True,
-                "items": [self._empty_state_item(is_audiobook=is_audiobook)],
+                "items": [self._empty_state_item(media_type=normalized_db_type)],
+                "db_type": normalized_db_type,
                 "summary": {
                     "users": len(all_user_totals),
                     "total_activities": sum(all_user_totals.values()),
@@ -619,7 +705,9 @@ class ActivityMetadataProvider(BaseMetadataProvider):
             "completed": completed_count,
         }
         if self.show_overall_summary:
-            activity_label = "청취 기록" if is_audiobook else "열람 기록"
+            activity_label = (
+                "청취 기록" if is_audiobook else "시청 기록" if is_video else "열람 기록"
+            )
             items.append(
                 {
                     "item_type": "metric",
@@ -661,6 +749,14 @@ class ActivityMetadataProvider(BaseMetadataProvider):
                         row["pages_read"], row["total_pages"], progress_percent, completed
                     )
                     cover_url = self._audiobook_cover_url(row["book_id"])
+                elif row.get("media_type") == "video":
+                    progress_text = self._video_progress_text(
+                        row["pages_read"], row["total_pages"], progress_percent, completed
+                    )
+                    progress_html = self._video_progress_html(
+                        row["pages_read"], row["total_pages"], progress_percent, completed
+                    )
+                    cover_url = self._video_cover_url(row["book_id"])
                 else:
                     progress_text = self._progress_text(row["pages_read"], row["total_pages"])
                     progress_html = self._progress_html(row["pages_read"], row["total_pages"])
@@ -694,6 +790,7 @@ class ActivityMetadataProvider(BaseMetadataProvider):
         return {
             "success": True,
             "items": items,
+            "db_type": normalized_db_type,
             "summary": summary,
             "preferences": {
                 "default_sort": default_sort,
