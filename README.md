@@ -2,13 +2,13 @@
 
 BookOasis에 저장된 진행 기록을 이용해 사용자별 최근 도서 열람·오디오북 청취·비디오북 시청 활동과 진행률을 보여주는 독립 카테고리 플러그인입니다.
 
-![전용 사용자 활동 탭](docs/activity-tab.png?v=1.4.0)
+![전용 사용자 활동 탭](docs/activity-tab.png?v=1.4.1)
 
 ## 버전 및 호환 정보
 
 | 항목 | 값 |
 | --- | --- |
-| 플러그인 버전 | `1.4.0` |
+| 플러그인 버전 | `1.4.1` |
 | 플러그인 ID | `activity` |
 | 클래스 | `ActivityMetadataProvider` |
 | 모듈 | `plugins.metadata.activity.activity` |
