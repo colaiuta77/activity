@@ -1,10 +1,13 @@
 <!-- 사용자별 독서 활동을 필터링하고 탐색하는 풀페이지 화면입니다. -->
 <main class="activity-page" id="activity-page">
   <header class="activity-hero">
-    <div>
-      <p class="activity-eyebrow">BOOKOASIS ACTIVITY</p>
-      <h1><i class="fa-solid fa-users-viewfinder" aria-hidden="true"></i> 사용자 활동</h1>
-      <p>사용자별 도서 열람·오디오북 청취·비디오북 시청 활동과 진행률을 한눈에 확인합니다.</p>
+    <div class="activity-brand">
+      <div class="activity-brand-icon"><i class="fa-solid fa-users-viewfinder" aria-hidden="true"></i></div>
+      <div class="activity-brand-copy">
+        <p class="activity-eyebrow">BOOKOASIS ACTIVITY</p>
+        <h1>사용자 활동</h1>
+        <p>사용자별 도서 열람·오디오북 청취·비디오북 시청 활동과 진행률을 한눈에 확인합니다.</p>
+      </div>
     </div>
     <div class="activity-hero-actions">
       <nav class="activity-library-switch" aria-label="서재 선택">
@@ -25,37 +28,36 @@
           비디오북
         </button>
       </nav>
-      <button class="activity-refresh" id="activity-refresh" type="button">
+      <button class="activity-refresh" id="activity-refresh" type="button" aria-label="새로고침" title="새로고침">
         <i class="fa-solid fa-rotate" aria-hidden="true"></i>
-        새로고침
       </button>
     </div>
   </header>
 
   <section class="activity-summary-grid" aria-label="활동 요약">
     <article class="activity-summary-card">
-      <div class="activity-summary-icon blue"><i class="fa-solid fa-user-group" aria-hidden="true"></i></div>
+      <div class="activity-summary-icon"><i class="fa-solid fa-user-group" aria-hidden="true"></i></div>
       <div class="activity-summary-info">
         <span>활동 사용자</span>
         <strong id="activity-summary-users">-</strong>
       </div>
     </article>
     <article class="activity-summary-card">
-      <div class="activity-summary-icon purple"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i></div>
+      <div class="activity-summary-icon"><i class="fa-solid fa-clock-rotate-left" aria-hidden="true"></i></div>
       <div class="activity-summary-info">
         <span id="activity-summary-total-label">전체 열람 기록</span>
         <strong id="activity-summary-total">-</strong>
       </div>
     </article>
     <article class="activity-summary-card">
-      <div class="activity-summary-icon green"><i class="fa-solid fa-book-open-reader" aria-hidden="true"></i></div>
+      <div class="activity-summary-icon"><i class="fa-solid fa-book-open-reader" aria-hidden="true"></i></div>
       <div class="activity-summary-info">
         <span id="activity-summary-progress-label">진행 중</span>
         <strong id="activity-summary-progress">-</strong>
       </div>
     </article>
     <article class="activity-summary-card activity-summary-complete">
-      <div class="activity-summary-icon orange"><i class="fa-solid fa-circle-check" aria-hidden="true"></i></div>
+      <div class="activity-summary-icon"><i class="fa-solid fa-circle-check" aria-hidden="true"></i></div>
       <div class="activity-summary-info">
         <span id="activity-summary-completed-label">완독</span>
         <strong id="activity-summary-completed">-</strong>
