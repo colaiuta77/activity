@@ -300,7 +300,7 @@
     });
     showState('활동 데이터를 불러오는 중입니다.', 'fa-solid fa-circle-notch fa-spin');
     try {
-      const response = await fetch(`/api/media/dashboard/widgets/activity/data?type=${encodeURIComponent(pageState.dbType)}&limit=100`);
+      const response = await fetch(`/api/media/dashboard/widgets/activity/data?type=${encodeURIComponent(pageState.dbType)}&limit=100&view=category`);
       const data = await response.json();
       if (requestId !== pageState.requestId) return;
       if (!response.ok || !data.success) throw new Error(data.error || '활동 데이터를 불러오지 못했습니다.');

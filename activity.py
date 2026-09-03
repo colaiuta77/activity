@@ -6,8 +6,27 @@ from urllib.parse import quote
 
 from plugins.metadata.base import BaseMetadataProvider
 
-PLUGIN_VERSION = "1.4.1"
+PLUGIN_VERSION = "1.5.0"
 logger = logging.getLogger(__name__)
+
+
+class _ActivityDeskWidget:
+    """코어의 클래스 속성 조회마다 저장된 데스크 노출 설정을 반영합니다."""
+
+    def __get__(self, instance, owner):
+        provider = instance if instance is not None else owner()
+        config = provider._plugin_config("general")
+        if not provider._config_bool(config, "SHOW_IN_DESK", False):
+            return None
+        return {
+            "title": "최근 사용자 활동",
+            "subtitle": "전체 요약과 사용자별 최근 활동",
+            "provider": "BookOasis",
+            "icon": "fa-solid fa-users-viewfinder",
+            "limit": 5,
+            "all_desk_tab": False,
+            "supported_types": ["general", "adult", "audiobook", "video"],
+        }
 
 
 class ActivityMetadataProvider(BaseMetadataProvider):
@@ -20,6 +39,13 @@ class ActivityMetadataProvider(BaseMetadataProvider):
     is_searchable = False
     config_schema = [
         {
+            "key": "SHOW_IN_DESK",
+            "label": "플러그인 데스크에 표시",
+            "type": "checkbox",
+            "default": False,
+            "description": "일반 서재에서 저장한 설정을 모든 서재에 공통 적용합니다. 기존 Activity Desk는 비활성화해 중복 표시를 방지하세요. 저장 후 플러그인 데스크를 새로고침하면 적용됩니다.",
+        },
+        {
             "key": "ITEMS_PER_USER",
             "label": "사용자별 표시 권수",
             "type": "number",
@@ -29,11 +55,11 @@ class ActivityMetadataProvider(BaseMetadataProvider):
         },
         {
             "key": "DESK_ITEM_LIMIT",
-            "label": "공통 데스크 표시 권수",
+            "label": "공통 데스크 사용자별 표시 권수",
             "type": "number",
             "default": 5,
             "required": True,
-            "description": "Activity Desk에 최근 활동을 최대 몇 건 표시할지 지정합니다. 1~20건까지 적용됩니다.",
+            "description": "공통 플러그인 데스크에 사용자 한 명당 표시할 최근 활동 수입니다. 사용자별로 1~20건까지 적용됩니다.",
         },
         {
             "key": "DEFAULT_SORT",
@@ -59,7 +85,7 @@ class ActivityMetadataProvider(BaseMetadataProvider):
             "default": True,
         },
     ]
-    dashboard_widget = None
+    dashboard_widget = _ActivityDeskWidget()
     category_tab = {
         "title": "사용자 활동",
         "icon": "fa-solid fa-users-viewfinder",
@@ -472,10 +498,62 @@ class ActivityMetadataProvider(BaseMetadataProvider):
             return {"success": False, "error": "관리자만 사용자 활동을 조회할 수 있습니다."}
 
         try:
-            return self._build_dashboard_data(db_type, limit)
+            desk_request = self._is_desk_request()
+            config = self._plugin_config("general") if desk_request else {}
+            if desk_request and not self._config_bool(config, "SHOW_IN_DESK", False):
+                return {"success": True, "items": []}
+            result = self._build_dashboard_data(db_type, limit)
+            return self._format_desk_data(db_type, result, config) if desk_request else result
         except Exception:
             logger.exception("사용자 활동 조회에 실패했습니다.")
             return {"success": True, "items": [self._error_state_item()]}
+
+    def _is_desk_request(self):
+        # 별도 Activity Desk의 super() 호출과 요청 문맥 없는 내부 호출은 기존 응답을 유지한다.
+        if self.id != "activity":
+            return False
+        try:
+            from flask import has_request_context, request
+
+            return has_request_context() and request.args.get("view") != "category"
+        except (ImportError, RuntimeError):
+            return False
+
+    def _format_desk_data(self, db_type, result, config):
+        activities = [item for item in result.get("items", []) if not item.get("item_type")]
+        if not activities:
+            return result
+
+        desk_limit = self._normalize_desk_limit(config.get("DESK_ITEM_LIMIT", 5))
+        activities.sort(
+            key=lambda item: (str(item.get("last_read_at") or ""), int(item.get("book_id") or 0)),
+            reverse=True,
+        )
+        user_counts = {}
+        selected = []
+        for item in activities:
+            username = item.get("username")
+            count = user_counts.get(username, 0)
+            if count < desk_limit:
+                selected.append(item)
+                user_counts[username] = count + 1
+        summary = result.get("summary", {})
+        activity_label = {"audiobook": "청취 기록", "video": "시청 기록"}.get(
+            self._normalize_db_type(db_type), "열람 기록"
+        )
+        summary_item = {
+            "item_type": "metric",
+            "metric": "<strong>전체 활동 요약</strong>",
+            "value": (
+                "사용자 "
+                f'<span style="color:#38bdf8;font-weight:700">{int(summary.get("users") or 0)}명</span>'
+                f" · {activity_label} "
+                f'<span style="color:#c084fc;font-weight:700">{int(summary.get("total_activities") or 0)}건</span>'
+            ),
+            "description": f"사용자별 최근 최대 <strong>{desk_limit}건</strong> · 총 <strong>{len(selected)}건</strong> 표시",
+        }
+        result["items"] = [summary_item, *selected]
+        return result
 
     def _build_dashboard_data(self, db_type, limit=20):
         normalized_db_type = self._normalize_db_type(db_type)
@@ -483,6 +561,10 @@ class ActivityMetadataProvider(BaseMetadataProvider):
         safe_limit = self._items_per_user(normalized_db_type, limit, config=config)
         default_sort = str(config.get("DEFAULT_SORT", "recent") or "recent").strip().lower()
         if default_sort not in {"recent", "progress", "username"}:
+            default_sort = "recent"
+        if self._is_desk_request() or self.id == "activity_desk":
+            desk_config = self._plugin_config("general") if self.id == "activity" else config
+            safe_limit = max(safe_limit, self._normalize_desk_limit(desk_config.get("DESK_ITEM_LIMIT", 5)))
             default_sort = "recent"
         show_completed = self._config_bool(config, "SHOW_COMPLETED", True)
         show_user_summary = self._config_bool(config, "SHOW_USER_SUMMARY", True)
