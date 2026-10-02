@@ -6,7 +6,7 @@ from urllib.parse import quote
 
 from plugins.metadata.base import BaseMetadataProvider
 
-PLUGIN_VERSION = "1.5.1"
+PLUGIN_VERSION = "1.5.2"
 logger = logging.getLogger(__name__)
 
 
@@ -36,6 +36,7 @@ class ActivityMetadataProvider(BaseMetadataProvider):
     name = "사용자 활동"
     version = PLUGIN_VERSION
     show_overall_summary = False
+    admin_only = True
     is_searchable = False
     config_schema = [
         {
@@ -139,7 +140,8 @@ class ActivityMetadataProvider(BaseMetadataProvider):
         normalized_db_type = self._normalize_db_type(db_type)
         rows = self.get_db_gateway(normalized_db_type).fetch_all(
             """
-            SELECT p.user_id, p.pages_read, b.total_pages, p.last_read_at
+            SELECT p.user_id, p.pages_read, p.is_completed, p.last_epub_percent,
+                   b.total_pages, b.file_format, p.last_read_at
             FROM user_progress p
             JOIN books b ON b.id = p.book_id
             WHERE p.book_id = ? AND COALESCE(b.is_deleted, 0) = 0
@@ -153,10 +155,15 @@ class ActivityMetadataProvider(BaseMetadataProvider):
         usernames_by_id = self._load_general_usernames()
         summaries = []
         for row in rows[:5]:
+            row = dict(row)
             user_id = int(row["user_id"])
             username = usernames_by_id.get(user_id) or f"사용자 #{user_id}"
+            progress_text = self._progress_text(
+                row["pages_read"], row["total_pages"],
+                self._row_progress_percent(row), self._row_is_completed(row),
+            )
             summaries.append(
-                f"{username} · {self._progress_text(row['pages_read'], row['total_pages'])}"
+                f"{username} · {progress_text}"
             )
         remainder = len(rows) - len(summaries)
         message = "\n".join(summaries)
@@ -218,26 +225,27 @@ class ActivityMetadataProvider(BaseMetadataProvider):
         }
 
     @staticmethod
-    def _progress_text(pages_read, total_pages):
+    def _progress_text(pages_read, total_pages, progress_percent=None, completed=None):
         pages = max(0, int(pages_read or 0))
         total = max(0, int(total_pages or 0))
-        percent = min(100, round((pages / total) * 100)) if total else 0
-        if total and percent >= 100:
-            return f"완독 · {pages}/{total}페이지 · 100%"
+        percent = progress_percent if progress_percent is not None else (min(100, round((pages / total) * 100)) if total else 0)
+        completed = percent >= 100 if completed is None else completed
+        if completed:
+            return f"완독 · {pages}/{total}페이지 · {percent}%" if total else f"완독 · {percent}%"
         if total:
             return f"진행 · {pages}/{total}페이지 · {percent}%"
-        return f"진행 · {pages}페이지"
+        return f"진행 · {pages}페이지 · {percent}%" if progress_percent is not None else f"진행 · {pages}페이지"
 
     @staticmethod
-    def _progress_html(pages_read, total_pages):
+    def _progress_html(pages_read, total_pages, progress_percent=None, completed=None):
         pages = max(0, int(pages_read or 0))
         total = max(0, int(total_pages or 0))
-        percent = min(100, round((pages / total) * 100)) if total else 0
-        completed = total and percent >= 100
+        percent = progress_percent if progress_percent is not None else (min(100, round((pages / total) * 100)) if total else 0)
+        completed = percent >= 100 if completed is None else completed
         label = "완독" if completed else "진행"
         color = "#4ade80" if completed else "#c084fc"
         page_text = f"{pages}/{total}페이지" if total else f"{pages}페이지"
-        percent_text = f" {percent}%" if total else ""
+        percent_text = f" {percent}%" if total or progress_percent is not None else ""
         return (
             f'<span style="color:{color};font-weight:700">{label}{percent_text}</span>'
             f"<br><small>{page_text}</small>"
@@ -355,6 +363,8 @@ class ActivityMetadataProvider(BaseMetadataProvider):
     @classmethod
     def _row_progress_percent(cls, row):
         override = row.get("progress_percent_override")
+        if str(row.get("file_format") or "").lower() == "epub":
+            override = row.get("last_epub_percent")
         if override is not None:
             try:
                 return max(0, min(100, round(float(override))))
@@ -422,6 +432,9 @@ class ActivityMetadataProvider(BaseMetadataProvider):
                 b.library_id,
                 b.cover_image,
                 p.pages_read,
+                p.is_completed,
+                p.last_epub_percent,
+                b.file_format,
                 b.total_pages,
                 p.last_read_at,
                 (
@@ -473,6 +486,16 @@ class ActivityMetadataProvider(BaseMetadataProvider):
                 row["pages_read"] = max(0, int(payload.get("pages_read", row.get("pages_read") or 0)))
             except (TypeError, ValueError):
                 pass
+            if payload.get("is_completed") is not None:
+                try:
+                    row["is_completed"] = int(payload["is_completed"])
+                except (TypeError, ValueError):
+                    pass
+            if payload.get("last_epub_percent") is not None:
+                try:
+                    row["last_epub_percent"] = float(payload["last_epub_percent"])
+                except (TypeError, ValueError):
+                    pass
             if payload.get("last_read_at"):
                 row["last_read_at"] = payload["last_read_at"]
 
@@ -497,16 +520,36 @@ class ActivityMetadataProvider(BaseMetadataProvider):
         if not self._is_admin_request():
             return {"success": False, "error": "관리자만 사용자 활동을 조회할 수 있습니다."}
 
+        normalized_db_type = self._normalize_db_type(db_type)
         try:
             desk_request = self._is_desk_request()
             config = self._plugin_config("general") if desk_request else {}
             if desk_request and not self._config_bool(config, "SHOW_IN_DESK", False):
                 return {"success": True, "items": []}
-            result = self._build_dashboard_data(db_type, limit)
-            return self._format_desk_data(db_type, result, config) if desk_request else result
+            result = self._build_dashboard_data(normalized_db_type, limit)
+            result = self._format_desk_data(normalized_db_type, result, config) if desk_request else result
+            self._update_load_problem(normalized_db_type)
+            return result
         except Exception:
             logger.exception("사용자 활동 조회에 실패했습니다.")
-            return {"success": True, "items": [self._error_state_item()]}
+            self._update_load_problem(normalized_db_type, failed=True)
+            return {"success": False, "error": "사용자 활동을 불러오지 못했습니다. 잠시 후 다시 시도하고 BookOasis 로그를 확인해 주세요.", "items": [self._error_state_item()]}
+
+    def _update_load_problem(self, db_type, failed=False):
+        helper = getattr(self, "report_problem" if failed else "resolve_problem", None)
+        if not callable(helper):
+            return
+        try:
+            if failed:
+                helper(
+                    "activity_load_failed", db_type=db_type, severity="action_required",
+                    title="사용자 활동 조회 실패",
+                    detail="DB 연결과 BookOasis 로그를 확인한 뒤 사용자 활동을 새로고침하세요. 정상 조회되면 자동 해결됩니다.",
+                )
+            else:
+                helper("activity_load_failed", db_type=db_type)
+        except Exception:
+            logger.warning("사용자 활동 문제 카드 갱신에 실패했습니다.", exc_info=True)
 
     def _is_desk_request(self):
         # 별도 Activity Desk의 super() 호출과 요청 문맥 없는 내부 호출은 기존 응답을 유지한다.
@@ -682,7 +725,9 @@ class ActivityMetadataProvider(BaseMetadataProvider):
                     last_read_at,
                     user_total_activities,
                     NULL AS progress_percent_override,
-                    0 AS is_completed,
+                    is_completed,
+                    last_epub_percent,
+                    file_format,
                     'book' AS media_type
                 FROM (
                     SELECT
@@ -694,6 +739,9 @@ class ActivityMetadataProvider(BaseMetadataProvider):
                         b.library_id,
                         b.cover_image,
                         p.pages_read,
+                        p.is_completed,
+                        p.last_epub_percent,
+                        b.file_format,
                         b.total_pages,
                         p.last_read_at,
                         COUNT(*) OVER (PARTITION BY p.user_id) AS user_total_activities,
@@ -840,8 +888,8 @@ class ActivityMetadataProvider(BaseMetadataProvider):
                     )
                     cover_url = self._video_cover_url(row["book_id"])
                 else:
-                    progress_text = self._progress_text(row["pages_read"], row["total_pages"])
-                    progress_html = self._progress_html(row["pages_read"], row["total_pages"])
+                    progress_text = self._progress_text(row["pages_read"], row["total_pages"], progress_percent, completed)
+                    progress_html = self._progress_html(row["pages_read"], row["total_pages"], progress_percent, completed)
                     cover_url = self._cover_url(row["cover_image"])
                 items.append(
                     {
